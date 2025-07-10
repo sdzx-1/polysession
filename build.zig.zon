@@ -1,0 +1,13 @@
+.{
+    .name = .polysession,
+    .version = "0.0.0",
+    .fingerprint = 0xf1294e43dca08fca, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.0-dev.913+c8b6ecc6e",
+    .dependencies = .{
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
