@@ -41,7 +41,8 @@ pub const Idle = union(enum) {
     pub const agency: Role = .client;
 
     pub fn process(ctx: *ClientContext) @This() {
-        if (ctx.client_counter > 100) return .{ .exit = .{ .data = {} } };
+        ctx.client_counter += 1;
+        if (ctx.client_counter > 10) return .{ .exit = .{ .data = {} } };
         return .{ .ping = .{ .data = ctx.client_counter } };
     }
 
@@ -61,7 +62,7 @@ pub const Busy = union(enum) {
     pub const agency: Role = .server;
 
     pub fn process(ctx: *ServerContext) @This() {
-        ctx.server_counter += 1;
+        ctx.server_counter += 2;
         return .{ .pong = .{ .data = ctx.server_counter } };
     }
 
@@ -275,26 +276,76 @@ pub fn Runner(
                     const State = StateFromId(state_id);
                     if (State == Exit) return;
 
-                    if (comptime State.agency == role) {
-                        const res = State.process(ctx);
-                        // send msg
-                        // ...
-                        std.debug.print("{t} send msg {any}\n", .{ role, res });
+                    const result = blk: {
+                        if (comptime State.agency == role) {
+                            const res = State.process(ctx);
 
-                        //
-                        switch (res) {
-                            inline else => |new_fsm_state_wit| {
-                                const NewFsmState = @TypeOf(new_fsm_state_wit);
-                                continue :sw comptime idFromState(NewFsmState.State);
-                            },
+                            // send msg
+                            switch (role) {
+                                .client => client_send(State, res),
+                                .server => server_send(State, res),
+                            }
+                            std.debug.print("{t} send msg {any}\n", .{ role, res });
+                            break :blk res;
+                        } else {
+                            //recv msg
+                            const res =
+                                switch (role) {
+                                    .client => client_recv(State),
+                                    .server => server_recv(State),
+                                };
+                            std.debug.print("{t} recv msg {any}\n", .{ role, res });
+                            State.preprocess(ctx, res);
+                            break :blk res;
                         }
-                    } else {
-                        //recv msg
-                        // ...
-                        std.debug.print("{t} recv msg\n", .{role});
+                    };
+
+                    switch (result) {
+                        inline else => |new_fsm_state_wit| {
+                            const NewFsmState = @TypeOf(new_fsm_state_wit);
+                            continue :sw comptime idFromState(NewFsmState.State);
+                        },
                     }
                 },
             }
         }
     };
+}
+
+//simple send, recv
+var client_mailbox: *const anyopaque = undefined;
+pub var client_mutex: std.Thread.Mutex = .{};
+
+var server_mailbox: *const anyopaque = undefined;
+pub var server_mutex: std.Thread.Mutex = .{};
+
+var gpa_install = std.heap.DebugAllocator(.{}).init;
+const gpa = gpa_install.allocator();
+
+pub fn client_send(T: type, val: T) void {
+    const val1 = gpa.create(T) catch unreachable;
+    val1.* = val;
+    server_mailbox = val1;
+    server_mutex.unlock();
+}
+
+pub fn client_recv(T: type) T {
+    client_mutex.lock();
+    const val: *const T = @ptrCast(@alignCast((client_mailbox)));
+    const val1 = val.*;
+    return val1;
+}
+
+pub fn server_send(T: type, val: T) void {
+    const val1 = gpa.create(T) catch unreachable;
+    val1.* = val;
+    client_mailbox = val1;
+    client_mutex.unlock();
+}
+
+pub fn server_recv(T: type) T {
+    server_mutex.lock();
+    const val: *const T = @ptrCast(@alignCast((server_mailbox)));
+    const val1 = val.*;
+    return val1;
 }
