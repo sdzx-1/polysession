@@ -54,7 +54,8 @@ pub const Context: ps.ClientAndServerContext = .{
     .server = ServerContext,
 };
 
-const EnterFsmState = PingPong(Idle(.client, PingPong(Idle(.server, PingPong(ps.Exit, void)), void)), void);
+const EnterFsmState = PingPong(Idle(.client, PingPong(ps.Exit, void)), void);
+// const EnterFsmState = PingPong(Idle(.client, PingPong(Idle(.server, PingPong(ps.Exit, void)), void)), void);
 
 pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
     return union(enum) {
@@ -130,7 +131,7 @@ pub const ClientChannel = struct {
 pub const ServerChannel = struct {
     pub fn send(_: anytype, val: anytype) void {
         const T = @TypeOf(val);
-        std.Thread.sleep(1 * std.time.ns_per_s);
+        std.Thread.sleep(1 * std.time.ns_per_ms);
         const val1 = gpa.create(T) catch unreachable;
         val1.* = val;
         client_mailbox = val1;
