@@ -18,60 +18,15 @@ pub fn Session(
     };
 }
 
-pub const Role = enum { client, server };
+pub const Role = enum {
+    client,
+    server,
 
-//example
-
-pub fn PingPong(State_: type, Data_: type) type {
-    return Session("PingPong", State_, Data_);
-}
-
-pub const ServerContext = struct {
-    server_counter: i32,
-};
-
-pub const ClientContext = struct {
-    client_counter: i32,
-};
-
-pub const Idle = union(enum) {
-    ping: PingPong(Busy, i32),
-    exit: PingPong(Exit, void),
-
-    pub const agency: Role = .client;
-
-    pub fn process(ctx: *ClientContext) @This() {
-        ctx.client_counter += 1;
-        if (ctx.client_counter > 10) return .{ .exit = .{ .data = {} } };
-        return .{ .ping = .{ .data = ctx.client_counter } };
-    }
-
-    pub fn preprocess(ctx: *ServerContext, msg: @This()) void {
-        switch (msg) {
-            .exit => {},
-            .ping => |val| {
-                ctx.server_counter = val.data;
-            },
-        }
-    }
-};
-
-pub const Busy = union(enum) {
-    pong: PingPong(Idle, i32),
-
-    pub const agency: Role = .server;
-
-    pub fn process(ctx: *ServerContext) @This() {
-        ctx.server_counter += 2;
-        return .{ .pong = .{ .data = ctx.server_counter } };
-    }
-
-    pub fn preprocess(ctx: *ClientContext, msg: @This()) void {
-        switch (msg) {
-            .pong => |val| {
-                ctx.client_counter = val.data;
-            },
-        }
+    pub fn flip(role: Role) Role {
+        return switch (role) {
+            .client => .server,
+            .server => .client,
+        };
     }
 };
 
@@ -182,7 +137,7 @@ fn reachableStatesDepthFirstSearch(
     }
 }
 
-const ClientAndServerContext = struct {
+pub const ClientAndServerContext = struct {
     client: type,
     server: type,
 };
@@ -255,6 +210,7 @@ pub const StateMap = struct {
 pub fn Runner(
     comptime FsmState: type,
     comptime role: Role,
+    channel: type,
 ) type {
     return struct {
         pub const Context = ContextFromState(FsmState.State);
@@ -279,21 +235,11 @@ pub fn Runner(
                     const result = blk: {
                         if (comptime State.agency == role) {
                             const res = State.process(ctx);
-
-                            // send msg
-                            switch (role) {
-                                .client => client_send(State, res),
-                                .server => server_send(State, res),
-                            }
+                            channel.send(ctx, res);
                             std.debug.print("{t} send msg {any}\n", .{ role, res });
                             break :blk res;
                         } else {
-                            //recv msg
-                            const res =
-                                switch (role) {
-                                    .client => client_recv(State),
-                                    .server => server_recv(State),
-                                };
+                            const res = channel.recv(ctx, State);
                             std.debug.print("{t} recv msg {any}\n", .{ role, res });
                             State.preprocess(ctx, res);
                             break :blk res;
@@ -310,43 +256,4 @@ pub fn Runner(
             }
         }
     };
-}
-
-//simple send, recv
-var client_mailbox: *const anyopaque = undefined;
-pub var client_mutex: std.Thread.Mutex = .{};
-
-var server_mailbox: *const anyopaque = undefined;
-pub var server_mutex: std.Thread.Mutex = .{};
-
-var gpa_install = std.heap.DebugAllocator(.{}).init;
-const gpa = gpa_install.allocator();
-
-pub fn client_send(T: type, val: T) void {
-    const val1 = gpa.create(T) catch unreachable;
-    val1.* = val;
-    server_mailbox = val1;
-    server_mutex.unlock();
-}
-
-pub fn client_recv(T: type) T {
-    client_mutex.lock();
-    const val: *const T = @ptrCast(@alignCast((client_mailbox)));
-    const val1 = val.*;
-    return val1;
-}
-
-pub fn server_send(T: type, val: T) void {
-    std.Thread.sleep(1 * std.time.ns_per_s);
-    const val1 = gpa.create(T) catch unreachable;
-    val1.* = val;
-    client_mailbox = val1;
-    client_mutex.unlock();
-}
-
-pub fn server_recv(T: type) T {
-    server_mutex.lock();
-    const val: *const T = @ptrCast(@alignCast((server_mailbox)));
-    const val1 = val.*;
-    return val1;
 }
