@@ -337,6 +337,7 @@ pub fn client_recv(T: type) T {
 }
 
 pub fn server_send(T: type, val: T) void {
+    std.Thread.sleep(1 * std.time.ns_per_s);
     const val1 = gpa.create(T) catch unreachable;
     val1.* = val;
     client_mailbox = val1;
