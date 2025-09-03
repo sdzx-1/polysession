@@ -5,16 +5,16 @@ pub const Exit = union(enum) {};
 
 pub fn Session(
     comptime name_: []const u8,
-    comptime State_: type,
     comptime Data_: type,
+    comptime State_: type,
 ) type {
     return struct {
         data: Data_,
 
         pub const name = name_;
 
-        pub const State = State_;
         pub const Data = Data_;
+        pub const State = State_;
     };
 }
 

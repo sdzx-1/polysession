@@ -35,8 +35,8 @@ pub fn main() !void {
 
 //example
 
-pub fn PingPong(State_: type, Data_: type) type {
-    return ps.Session("PingPong", State_, Data_);
+pub fn PingPong(Data_: type, State_: type) type {
+    return ps.Session("PingPong", Data_, State_);
 }
 
 pub const ServerContext = struct {
@@ -54,12 +54,12 @@ pub const Context: ps.ClientAndServerContext = .{
     .server = ServerContext,
 };
 
-const EnterFsmState = PingPong(Idle(.client, PingPong(ps.Exit, void)), void);
-// const EnterFsmState = PingPong(Idle(.client, PingPong(Idle(.server, PingPong(ps.Exit, void)), void)), void);
+// const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, ps.Exit)));
+const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, ps.Exit)))));
 
 pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
     return union(enum) {
-        ping: PingPong(Busy(agency_.flip(), NextFsmState), i32),
+        ping: PingPong(i32, Busy(agency_.flip(), NextFsmState)),
         next: NextFsmState,
 
         pub const agency: ps.Role = agency_;
@@ -82,12 +82,12 @@ pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
 }
 pub fn Busy(agency_: ps.Role, NextFsmState: type) type {
     return union(enum) {
-        pong: PingPong(Idle(agency_.flip(), NextFsmState), i32),
+        pong: PingPong(i32, Idle(agency_.flip(), NextFsmState)),
 
         pub const agency: ps.Role = agency_;
 
         pub fn process(ctx: *@field(Context, @tagName(agency_))) @This() {
-            ctx.server_counter += 2;
+            ctx.server_counter += 1;
             return .{ .pong = .{ .data = ctx.server_counter } };
         }
 
