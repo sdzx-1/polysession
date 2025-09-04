@@ -1,36 +1,61 @@
 const std = @import("std");
 const ps = @import("root.zig");
+const net = std.net;
 
 pub fn main() !void {
-    //
-    client_mutex.lock();
-    server_mutex.lock();
 
     //Server
-    const ServerRunner = ps.Runner(EnterFsmState, .server, ServerChannel);
-    const curr_id = ServerRunner.idFromState(EnterFsmState.State);
+    const localhost = try net.Address.parseIp("127.0.0.1", 0);
+
+    var server = try localhost.listen(.{});
+    defer server.deinit();
+    //
+
+    const S = struct {
+        fn clientFn(server_address: net.Address) !void {
+            const socket = try net.tcpConnectToAddress(server_address);
+            defer socket.close();
+
+            var reader_buf: [16]u8 = undefined;
+            var writer_buf: [16]u8 = undefined;
+
+            var client_context: ClientContext = .{
+                .stream_reader = socket.reader(&reader_buf),
+                .stream_writer = socket.writer(&writer_buf),
+                .server_counter = 0,
+                .client_counter = 0,
+            };
+
+            //Client
+            const ClientRunner = ps.Runner(EnterFsmState, .client, Channel(ClientContext));
+            const curr_id = ClientRunner.idFromState(EnterFsmState.State);
+            ClientRunner.runProtocol(curr_id, &client_context);
+        }
+    };
+
+    const t = try std.Thread.spawn(.{}, S.clientFn, .{server.listen_address});
+    defer t.join();
+
+    //
+
+    var client = try server.accept();
+    defer client.stream.close();
+
+    var reader_buf: [16]u8 = undefined;
+    var writer_buf: [16]u8 = undefined;
+
     var server_context: ServerContext = .{
+        .stream_reader = client.stream.reader(&reader_buf),
+        .stream_writer = client.stream.writer(&writer_buf),
         .server_counter = 0,
         .client_counter = 0,
     };
+
+    const ServerRunner = ps.Runner(EnterFsmState, .server, Channel(ServerContext));
+    const curr_id = ServerRunner.idFromState(EnterFsmState.State);
 
     const stid = try std.Thread.spawn(.{}, ServerRunner.runProtocol, .{ curr_id, &server_context });
-
-    //Client
-    const ClientRunner = ps.Runner(EnterFsmState, .client, ClientChannel);
-    const curr_id1 = ClientRunner.idFromState(EnterFsmState.State);
-    var client_context: ClientContext = .{
-        .client_counter = 0,
-        .server_counter = 0,
-    };
-
-    const ctid = try std.Thread.spawn(.{}, ClientRunner.runProtocol, .{ curr_id1, &client_context });
-
-    ctid.join();
-    stid.join();
-
-    std.debug.print("client_context: {any}\n", .{client_context});
-    std.debug.print("server_context: {any}\n", .{server_context});
+    defer stid.join();
 }
 
 //example
@@ -40,11 +65,17 @@ pub fn PingPong(Data_: type, State_: type) type {
 }
 
 pub const ServerContext = struct {
+    stream_writer: net.Stream.Writer,
+    stream_reader: net.Stream.Reader,
+
     server_counter: i32,
     client_counter: i32,
 };
 
 pub const ClientContext = struct {
+    stream_writer: net.Stream.Writer,
+    stream_reader: net.Stream.Reader,
+
     client_counter: i32,
     server_counter: i32,
 };
@@ -78,6 +109,22 @@ pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
                 },
             }
         }
+
+        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
+            switch (tag) {
+                .ping => {
+                    const PayloadT = std.meta.TagPayload(@This(), tag);
+                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    return .{ .ping = payload };
+                },
+
+                .next => {
+                    const PayloadT = std.meta.TagPayload(@This(), tag);
+                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    return .{ .next = payload };
+                },
+            }
+        }
     };
 }
 pub fn Busy(agency_: ps.Role, NextFsmState: type) type {
@@ -98,50 +145,47 @@ pub fn Busy(agency_: ps.Role, NextFsmState: type) type {
                 },
             }
         }
+
+        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
+            switch (tag) {
+                .pong => {
+                    const PayloadT = std.meta.TagPayload(@This(), tag);
+                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    return .{ .pong = payload };
+                },
+            }
+        }
     };
 }
 
-//simple send, recv
-var client_mailbox: *const anyopaque = undefined;
-pub var client_mutex: std.Thread.Mutex = .{};
+pub fn Channel(Context_: type) type {
+    return struct {
+        pub fn send(ctx: *Context_, val: anytype) void {
+            const writer = &ctx.stream_writer.interface;
+            switch (val) {
+                inline else => |msg, tag| {
+                    writer.writeByte(@intFromEnum(tag)) catch unreachable;
+                    writer.writeStruct(msg, .little) catch unreachable;
+                },
+            }
 
-var server_mailbox: *const anyopaque = undefined;
-pub var server_mutex: std.Thread.Mutex = .{};
+            writer.flush() catch unreachable;
+        }
 
-var gpa_install = std.heap.DebugAllocator(.{}).init;
-const gpa = gpa_install.allocator();
-
-pub const ClientChannel = struct {
-    pub fn send(_: anytype, val: anytype) void {
-        const T = @TypeOf(val);
-        const val1 = gpa.create(T) catch unreachable;
-        val1.* = val;
-        server_mailbox = val1;
-        server_mutex.unlock();
-    }
-
-    pub fn recv(_: anytype, T: type) T {
-        client_mutex.lock();
-        const val: *const T = @ptrCast(@alignCast((client_mailbox)));
-        const val1 = val.*;
-        return val1;
-    }
-};
-
-pub const ServerChannel = struct {
-    pub fn send(_: anytype, val: anytype) void {
-        const T = @TypeOf(val);
-        std.Thread.sleep(1 * std.time.ns_per_ms);
-        const val1 = gpa.create(T) catch unreachable;
-        val1.* = val;
-        client_mailbox = val1;
-        client_mutex.unlock();
-    }
-
-    pub fn recv(_: anytype, T: type) T {
-        server_mutex.lock();
-        const val: *const T = @ptrCast(@alignCast((server_mailbox)));
-        const val1 = val.*;
-        return val1;
-    }
-};
+        pub fn recv(ctx: *Context_, T: type) T {
+            const reader = ctx.stream_reader.interface();
+            const recv_tag_num = reader.takeByte() catch unreachable;
+            const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
+            switch (tag) {
+                inline else => |t| {
+                    //
+                    // const PayloadT = std.meta.TagPayload(T, t);
+                    // const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    // return .{ .(@tagName(t)) = payload };
+                    //
+                    return T.decode(t, reader);
+                },
+            }
+        }
+    };
+}

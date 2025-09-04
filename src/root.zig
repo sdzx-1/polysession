@@ -8,7 +8,7 @@ pub fn Session(
     comptime Data_: type,
     comptime State_: type,
 ) type {
-    return struct {
+    return packed struct {
         data: Data_,
 
         pub const name = name_;
