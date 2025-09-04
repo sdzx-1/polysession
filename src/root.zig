@@ -142,7 +142,7 @@ pub const ClientAndServerContext = struct {
     server: type,
 };
 
-fn ContextFromState(comptime State: type) ClientAndServerContext {
+pub fn ContextFromState(comptime State: type) ClientAndServerContext {
     const process_context =
         @typeInfo(@typeInfo(@TypeOf(State.process)).@"fn".params[0].type.?).pointer.child;
 

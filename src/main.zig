@@ -82,9 +82,113 @@ pub const Context: ps.ClientAndServerContext = .{
     .server = ServerContext,
 };
 
+pub fn Channel(Context_: type) type {
+    return struct {
+        pub fn send(ctx: *Context_, val: anytype) void {
+            const writer = &ctx.stream_writer.interface;
+            switch (val) {
+                inline else => |msg, tag| {
+                    writer.writeByte(@intFromEnum(tag)) catch unreachable;
+                    writer.writeStruct(msg, .little) catch unreachable;
+                },
+            }
+
+            writer.flush() catch unreachable;
+        }
+
+        pub fn recv(ctx: *Context_, T: type) T {
+            const reader = ctx.stream_reader.interface();
+            const recv_tag_num = reader.takeByte() catch unreachable;
+            const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
+            switch (tag) {
+                inline else => |t| {
+                    //
+                    // const PayloadT = std.meta.TagPayload(T, t);
+                    // const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    // return .{ .(@tagName(t)) = payload };
+                    // // There seems to be no such function for tagged union, which allows tags to be specified dynamically at compile time.
+                    // // So I had to use the following solution.
+                    //
+                    return T.decode(t, reader);
+                },
+            }
+        }
+    };
+}
+
+pub fn Cast(
+    Protocol: fn (type, type) type,
+    Val: type,
+    NextState: type,
+    agency_: ps.Role,
+    Context_: ps.ClientAndServerContext,
+    process_fun: fn (*@field(Context_, @tagName(agency_))) Val,
+    preprocess_fun: fn (*@field(Context_, @tagName(agency_.flip())), Val) void,
+) type {
+    return union(enum) {
+        cast: Protocol(Val, NextState),
+
+        pub const agency: ps.Role = agency_;
+
+        pub fn process(ctx: *@field(Context_, @tagName(agency_))) @This() {
+            return .{ .cast = .{ .data = process_fun(ctx) } };
+        }
+
+        pub fn preprocess(ctx: *@field(Context_, @tagName(agency_.flip())), msg: @This()) void {
+            switch (msg) {
+                .cast => |val| preprocess_fun(ctx, val.data),
+            }
+        }
+
+        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
+            switch (tag) {
+                .cast => {
+                    const PayloadT = std.meta.TagPayload(@This(), tag);
+                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    return .{ .cast = payload };
+                },
+            }
+        }
+    };
+}
+
+//
+fn foo(ctx: *ClientContext) i32 {
+    ctx.client_counter += 1;
+    return ctx.client_counter;
+}
+
+fn bar(ctx: *ServerContext, val: i32) void {
+    ctx.server_counter = val;
+}
+
+fn foo1(ctx: *ServerContext) i32 {
+    ctx.server_counter += 1;
+    return ctx.server_counter;
+}
+
+fn bar1(ctx: *ClientContext, val: i32) void {
+    ctx.client_counter = val;
+}
+
+fn C2S(Next: type) type {
+    return Cast(PingPong, i32, Next, .client, Context, foo, bar);
+}
+
+fn S2C(Next: type) type {
+    return Cast(PingPong, i32, Next, .server, Context, foo1, bar1);
+}
+
+const P1 = PingPong(void, C2S(S2C(C2S(S2C(C2S(S2C(ps.Exit)))))));
+
+const EnterFsmState = P1;
+
+const Runner = ps.Runner(EnterFsmState);
+const curr_id = Runner.idFromState(EnterFsmState.State);
+
 // const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, ps.Exit)));
 // const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, ps.Exit)))));
-const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, Loop)))));
+// const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, Loop)))));
 
 const Loop = union(enum) {
     back: EnterFsmState,
@@ -127,9 +231,6 @@ const Loop = union(enum) {
         }
     }
 };
-
-const Runner = ps.Runner(EnterFsmState);
-const curr_id = Runner.idFromState(EnterFsmState.State);
 
 pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
     return union(enum) {
@@ -197,40 +298,6 @@ pub fn Busy(agency_: ps.Role, NextFsmState: type) type {
                     const PayloadT = std.meta.TagPayload(@This(), tag);
                     const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
                     return .{ .pong = payload };
-                },
-            }
-        }
-    };
-}
-
-pub fn Channel(Context_: type) type {
-    return struct {
-        pub fn send(ctx: *Context_, val: anytype) void {
-            const writer = &ctx.stream_writer.interface;
-            switch (val) {
-                inline else => |msg, tag| {
-                    writer.writeByte(@intFromEnum(tag)) catch unreachable;
-                    writer.writeStruct(msg, .little) catch unreachable;
-                },
-            }
-
-            writer.flush() catch unreachable;
-        }
-
-        pub fn recv(ctx: *Context_, T: type) T {
-            const reader = ctx.stream_reader.interface();
-            const recv_tag_num = reader.takeByte() catch unreachable;
-            const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
-            switch (tag) {
-                inline else => |t| {
-                    //
-                    // const PayloadT = std.meta.TagPayload(T, t);
-                    // const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    // return .{ .(@tagName(t)) = payload };
-                    // // There seems to be no such function for tagged union, which allows tags to be specified dynamically at compile time.
-                    // // So I had to use the following solution.
-                    //
-                    return T.decode(t, reader);
                 },
             }
         }
