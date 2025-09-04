@@ -209,8 +209,6 @@ pub const StateMap = struct {
 
 pub fn Runner(
     comptime FsmState: type,
-    comptime role: Role,
-    channel: type,
 ) type {
     return struct {
         pub const Context = ContextFromState(FsmState.State);
@@ -225,7 +223,13 @@ pub fn Runner(
             return state_map.StateFromId(state_id);
         }
 
-        pub fn runProtocol(curr_id: StateId, ctx: *@field(Context, @tagName(role))) void {
+        pub fn runProtocol(
+            comptime role: Role,
+            comptime channel: type,
+            log_msg: bool,
+            curr_id: StateId,
+            ctx: *@field(Context, @tagName(role)),
+        ) void {
             @setEvalBranchQuota(10_000_000);
             sw: switch (curr_id) {
                 inline else => |state_id| {
@@ -236,11 +240,11 @@ pub fn Runner(
                         if (comptime State.agency == role) {
                             const res = State.process(ctx);
                             channel.send(ctx, res);
-                            std.debug.print("{t} send msg {any}\n", .{ role, res });
+                            if (log_msg) std.debug.print("{t} send msg {any}\n", .{ role, res });
                             break :blk res;
                         } else {
                             const res = channel.recv(ctx, State);
-                            std.debug.print("{t} recv msg {any}\n", .{ role, res });
+                            if (log_msg) std.debug.print("{t} recv msg {any}\n", .{ role, res });
                             State.preprocess(ctx, res);
                             break :blk res;
                         }

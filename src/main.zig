@@ -26,10 +26,7 @@ pub fn main() !void {
                 .client_counter = 0,
             };
 
-            //Client
-            const ClientRunner = ps.Runner(EnterFsmState, .client, Channel(ClientContext));
-            const curr_id = ClientRunner.idFromState(EnterFsmState.State);
-            ClientRunner.runProtocol(curr_id, &client_context);
+            Runner.runProtocol(.client, Channel(ClientContext), true, curr_id, &client_context);
         }
     };
 
@@ -51,10 +48,7 @@ pub fn main() !void {
         .client_counter = 0,
     };
 
-    const ServerRunner = ps.Runner(EnterFsmState, .server, Channel(ServerContext));
-    const curr_id = ServerRunner.idFromState(EnterFsmState.State);
-
-    const stid = try std.Thread.spawn(.{}, ServerRunner.runProtocol, .{ curr_id, &server_context });
+    const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{ .server, Channel(ServerContext), true, curr_id, &server_context });
     defer stid.join();
 }
 
@@ -86,7 +80,11 @@ pub const Context: ps.ClientAndServerContext = .{
 };
 
 // const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, ps.Exit)));
-const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, ps.Exit)))));
+// const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, ps.Exit)))));
+const EnterFsmState = PingPong(void, Idle(.server, PingPong(void, Idle(.server, PingPong(void, ps.Exit)))));
+
+const Runner = ps.Runner(EnterFsmState);
+const curr_id = Runner.idFromState(EnterFsmState.State);
 
 pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
     return union(enum) {
@@ -97,7 +95,9 @@ pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
 
         pub fn process(ctx: *@field(Context, @tagName(agency_))) @This() {
             ctx.client_counter += 1;
-            if (ctx.client_counter > 10) return .{ .next = .{ .data = {} } };
+            if (ctx.client_counter > 10) {
+                return .{ .next = .{ .data = {} } };
+            }
             return .{ .ping = .{ .data = ctx.client_counter } };
         }
 
