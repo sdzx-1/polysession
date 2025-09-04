@@ -152,6 +152,51 @@ pub fn Cast(
     };
 }
 
+pub fn IF(
+    Protocol: fn (type, type) type,
+    agency_: ps.Role,
+    Context_: ps.ClientAndServerContext,
+    fun: fn (*@field(Context_, @tagName(agency_))) bool,
+    Yes: type,
+    No: type,
+) type {
+    return union(enum) {
+        yes: Protocol(void, Yes),
+        no: Protocol(void, No),
+
+        pub const agency: ps.Role = agency_;
+
+        pub fn process(ctx: *@field(Context, @tagName(agency_))) @This() {
+            if (fun(ctx)) {
+                return .{ .yes = .{ .data = {} } };
+            } else {
+                return .{ .no = .{ .data = {} } };
+            }
+        }
+
+        pub fn preprocess(ctx: *@field(Context, @tagName(agency_.flip())), msg: @This()) void {
+            _ = ctx;
+            _ = msg;
+        }
+
+        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
+            switch (tag) {
+                .yes => {
+                    const PayloadT = std.meta.TagPayload(@This(), tag);
+                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    return .{ .yes = payload };
+                },
+
+                .no => {
+                    const PayloadT = std.meta.TagPayload(@This(), tag);
+                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    return .{ .no = payload };
+                },
+            }
+        }
+    };
+}
+
 //
 fn foo(ctx: *ClientContext) i32 {
     ctx.client_counter += 1;
@@ -171,6 +216,10 @@ fn bar1(ctx: *ClientContext, val: i32) void {
     ctx.client_counter = val;
 }
 
+fn check(ctx: *ClientContext) bool {
+    return ctx.client_counter < 10;
+}
+
 fn C2S(Next: type) type {
     return Cast(PingPong, i32, Next, .client, Context, foo, bar);
 }
@@ -179,7 +228,33 @@ fn S2C(Next: type) type {
     return Cast(PingPong, i32, Next, .server, Context, foo1, bar1);
 }
 
-const P1 = PingPong(void, C2S(S2C(C2S(S2C(C2S(S2C(ps.Exit)))))));
+const P1 = PingPong(void, IF(PingPong, .client, Context, check, C2S(S2C(Loop1)), ps.Exit));
+
+const Loop1 = union(enum) {
+    back: P1,
+
+    pub const agency: ps.Role = .server;
+
+    pub fn process(ctx: *@field(Context, @tagName(agency))) @This() {
+        _ = ctx;
+        return .{ .back = .{ .data = {} } };
+    }
+
+    pub fn preprocess(ctx: *@field(Context, @tagName(agency.flip())), msg: @This()) void {
+        _ = msg;
+        _ = ctx;
+    }
+
+    pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
+        switch (tag) {
+            .back => {
+                const PayloadT = std.meta.TagPayload(@This(), tag);
+                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                return .{ .back = payload };
+            },
+        }
+    }
+};
 
 const EnterFsmState = P1;
 
