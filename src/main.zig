@@ -46,6 +46,7 @@ pub fn main() !void {
         .stream_writer = client.stream.writer(&writer_buf),
         .server_counter = 0,
         .client_counter = 0,
+        .counter = 0,
     };
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{ .server, Channel(ServerContext), true, curr_id, &server_context });
@@ -64,6 +65,8 @@ pub const ServerContext = struct {
 
     server_counter: i32,
     client_counter: i32,
+
+    counter: i32,
 };
 
 pub const ClientContext = struct {
@@ -81,7 +84,49 @@ pub const Context: ps.ClientAndServerContext = .{
 
 // const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, ps.Exit)));
 // const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, ps.Exit)))));
-const EnterFsmState = PingPong(void, Idle(.server, PingPong(void, Idle(.server, PingPong(void, ps.Exit)))));
+const EnterFsmState = PingPong(void, Idle(.client, PingPong(void, Idle(.server, PingPong(void, Loop)))));
+
+const Loop = union(enum) {
+    back: EnterFsmState,
+    exit: PingPong(void, ps.Exit),
+
+    pub const agency: ps.Role = .server;
+
+    pub fn process(ctx: *@field(Context, @tagName(agency))) @This() {
+        ctx.counter += 1;
+        std.debug.print("counter: {d}\n", .{ctx.counter});
+        if (ctx.counter >= 3) return .{ .exit = .{ .data = {} } };
+        ctx.client_counter = 0;
+        ctx.server_counter = 0;
+        return .{ .back = .{ .data = {} } };
+    }
+
+    pub fn preprocess(ctx: *@field(Context, @tagName(agency.flip())), msg: @This()) void {
+        switch (msg) {
+            .exit => {},
+            .back => {
+                ctx.client_counter = 0;
+                ctx.server_counter = 0;
+            },
+        }
+    }
+
+    pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
+        switch (tag) {
+            .back => {
+                const PayloadT = std.meta.TagPayload(@This(), tag);
+                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                return .{ .back = payload };
+            },
+
+            .exit => {
+                const PayloadT = std.meta.TagPayload(@This(), tag);
+                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                return .{ .exit = payload };
+            },
+        }
+    }
+};
 
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);
