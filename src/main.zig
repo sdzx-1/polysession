@@ -182,6 +182,8 @@ pub fn Channel(Context_: type) type {
                     // const PayloadT = std.meta.TagPayload(T, t);
                     // const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
                     // return .{ .(@tagName(t)) = payload };
+                    // // There seems to be no such function for tagged union, which allows tags to be specified dynamically at compile time.
+                    // // So I had to use the following solution.
                     //
                     return T.decode(t, reader);
                 },
