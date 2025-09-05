@@ -102,14 +102,9 @@ pub fn Channel(Context_: type) type {
             const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
             switch (tag) {
                 inline else => |t| {
-                    //
-                    // const PayloadT = std.meta.TagPayload(T, t);
-                    // const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    // return .{ .(@tagName(t)) = payload };
-                    // // There seems to be no such function for tagged union, which allows tags to be specified dynamically at compile time.
-                    // // So I had to use the following solution.
-                    //
-                    return T.decode(t, reader);
+                    const PayloadT = std.meta.TagPayload(T, t);
+                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                    return @unionInit(T, @tagName(t), payload);
                 },
             }
         }
@@ -137,16 +132,6 @@ pub fn Cast(
         pub fn preprocess(ctx: *@field(Context_, @tagName(agency_.flip())), msg: @This()) void {
             switch (msg) {
                 .cast => |val| preprocess_fun(ctx, val.data),
-            }
-        }
-
-        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
-            switch (tag) {
-                .cast => {
-                    const PayloadT = std.meta.TagPayload(@This(), tag);
-                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    return .{ .cast = payload };
-                },
             }
         }
     };
@@ -177,22 +162,6 @@ pub fn IF(
         pub fn preprocess(ctx: *@field(Context, @tagName(agency_.flip())), msg: @This()) void {
             _ = ctx;
             _ = msg;
-        }
-
-        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
-            switch (tag) {
-                .yes => {
-                    const PayloadT = std.meta.TagPayload(@This(), tag);
-                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    return .{ .yes = payload };
-                },
-
-                .no => {
-                    const PayloadT = std.meta.TagPayload(@This(), tag);
-                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    return .{ .no = payload };
-                },
-            }
         }
     };
 }
@@ -244,16 +213,6 @@ const Loop1 = union(enum) {
         _ = msg;
         _ = ctx;
     }
-
-    pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
-        switch (tag) {
-            .back => {
-                const PayloadT = std.meta.TagPayload(@This(), tag);
-                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                return .{ .back = payload };
-            },
-        }
-    }
 };
 // PingPong new impl
 //
@@ -273,22 +232,6 @@ const St1 = union(enum) {
         switch (msg) {
             .ping => |val| bar(ctx, val.data),
             .exit => {},
-        }
-    }
-
-    pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
-        switch (tag) {
-            .ping => {
-                const PayloadT = std.meta.TagPayload(@This(), tag);
-                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                return .{ .ping = payload };
-            },
-
-            .exit => {
-                const PayloadT = std.meta.TagPayload(@This(), tag);
-                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                return .{ .exit = payload };
-            },
         }
     }
 };
@@ -328,22 +271,6 @@ const Loop = union(enum) {
             },
         }
     }
-
-    pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
-        switch (tag) {
-            .back => {
-                const PayloadT = std.meta.TagPayload(@This(), tag);
-                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                return .{ .back = payload };
-            },
-
-            .exit => {
-                const PayloadT = std.meta.TagPayload(@This(), tag);
-                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                return .{ .exit = payload };
-            },
-        }
-    }
 };
 
 pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
@@ -369,22 +296,6 @@ pub fn Idle(agency_: ps.Role, NextFsmState: type) type {
                 },
             }
         }
-
-        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
-            switch (tag) {
-                .ping => {
-                    const PayloadT = std.meta.TagPayload(@This(), tag);
-                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    return .{ .ping = payload };
-                },
-
-                .next => {
-                    const PayloadT = std.meta.TagPayload(@This(), tag);
-                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    return .{ .next = payload };
-                },
-            }
-        }
     };
 }
 pub fn Busy(agency_: ps.Role, NextFsmState: type) type {
@@ -402,16 +313,6 @@ pub fn Busy(agency_: ps.Role, NextFsmState: type) type {
             switch (msg) {
                 .pong => |val| {
                     ctx.client_counter = val.data;
-                },
-            }
-        }
-
-        pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
-            switch (tag) {
-                .pong => {
-                    const PayloadT = std.meta.TagPayload(@This(), tag);
-                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    return .{ .pong = payload };
                 },
             }
         }
