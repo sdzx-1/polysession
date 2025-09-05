@@ -240,10 +240,12 @@ pub fn Runner(
                         if (comptime State.agency == role) {
                             const res = State.process(ctx);
                             channel.send(ctx, res);
+                            if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                             if (log_msg) std.debug.print("{t} send msg {any}\n", .{ role, res });
                             break :blk res;
                         } else {
                             const res = channel.recv(ctx, State);
+                            if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                             if (log_msg) std.debug.print("{t} recv msg {any}\n", .{ role, res });
                             State.preprocess(ctx, res);
                             break :blk res;
