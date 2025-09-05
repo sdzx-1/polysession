@@ -255,8 +255,47 @@ const Loop1 = union(enum) {
         }
     }
 };
+// PingPong new impl
+//
 
-const EnterFsmState = P1;
+const St1 = union(enum) {
+    ping: PingPong(i32, S2C(@This())),
+    exit: PingPong(void, ps.Exit),
+
+    pub const agency: ps.Role = .client;
+
+    pub fn process(ctx: *@field(Context, @tagName(agency))) @This() {
+        if (!check(ctx)) return .{ .exit = .{ .data = {} } };
+        return .{ .ping = .{ .data = foo(ctx) } };
+    }
+
+    pub fn preprocess(ctx: *@field(Context, @tagName(agency.flip())), msg: @This()) void {
+        switch (msg) {
+            .ping => |val| bar(ctx, val.data),
+            .exit => {},
+        }
+    }
+
+    pub fn decode(comptime tag: std.meta.Tag(@This()), reader: *std.Io.Reader) @This() {
+        switch (tag) {
+            .ping => {
+                const PayloadT = std.meta.TagPayload(@This(), tag);
+                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                return .{ .ping = payload };
+            },
+
+            .exit => {
+                const PayloadT = std.meta.TagPayload(@This(), tag);
+                const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
+                return .{ .exit = payload };
+            },
+        }
+    }
+};
+
+const P2 = PingPong(void, St1);
+
+const EnterFsmState = P2;
 
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);
