@@ -263,3 +263,32 @@ pub fn Runner(
         }
     };
 }
+
+pub fn Cast(
+    comptime Label_: []const u8,
+    comptime Protocol: fn (type, type) type,
+    comptime Msg: type,
+    comptime NextState: type,
+    comptime agency_: Role,
+    comptime Context_: ClientAndServerContext,
+    comptime process_fun: fn (*@field(Context_, @tagName(agency_))) Msg,
+    comptime preprocess_fun: fn (*@field(Context_, @tagName(agency_.flip())), Msg) void,
+) type {
+    return union(enum) {
+        cast: Protocol(Msg, NextState),
+
+        pub const Label = Label_;
+
+        pub const agency: Role = agency_;
+
+        pub fn process(ctx: *@field(Context_, @tagName(agency_))) @This() {
+            return .{ .cast = .{ .data = process_fun(ctx) } };
+        }
+
+        pub fn preprocess(ctx: *@field(Context_, @tagName(agency_.flip())), msg: @This()) void {
+            switch (msg) {
+                .cast => |val| preprocess_fun(ctx, val.data),
+            }
+        }
+    };
+}

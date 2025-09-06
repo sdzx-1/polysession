@@ -101,35 +101,6 @@ pub fn Channel(Context_: type) type {
     };
 }
 
-pub fn Cast(
-    comptime Label_: []const u8,
-    comptime Protocol: fn (type, type) type,
-    comptime Msg: type,
-    comptime NextState: type,
-    comptime agency_: ps.Role,
-    comptime Context_: ps.ClientAndServerContext,
-    comptime process_fun: fn (*@field(Context_, @tagName(agency_))) Msg,
-    comptime preprocess_fun: fn (*@field(Context_, @tagName(agency_.flip())), Msg) void,
-) type {
-    return union(enum) {
-        cast: Protocol(Msg, NextState),
-
-        pub const Label = Label_;
-
-        pub const agency: ps.Role = agency_;
-
-        pub fn process(ctx: *@field(Context_, @tagName(agency_))) @This() {
-            return .{ .cast = .{ .data = process_fun(ctx) } };
-        }
-
-        pub fn preprocess(ctx: *@field(Context_, @tagName(agency_.flip())), msg: @This()) void {
-            switch (msg) {
-                .cast => |val| preprocess_fun(ctx, val.data),
-            }
-        }
-    };
-}
-
 //example PingPong
 
 pub fn PingPong(Data_: type, State_: type) type {
@@ -165,7 +136,7 @@ fn pong_preprocess(ctx: *ClientContext, val: i32) void {
 }
 
 const St = union(enum) {
-    ping: PingPong(i32, Cast("pong", PingPong, i32, @This(), .server, Context, pong_process, pong_preprocess)),
+    ping: PingPong(i32, ps.Cast("pong", PingPong, i32, @This(), .server, Context, pong_process, pong_preprocess)),
     exit: PingPong(void, ps.Exit),
 
     pub const agency: ps.Role = .client;
