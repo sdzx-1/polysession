@@ -57,7 +57,17 @@ pub fn Channel(Context_: type) type {
             switch (val) {
                 inline else => |msg, tag| {
                     writer.writeByte(@intFromEnum(tag)) catch unreachable;
-                    writer.writeStruct(msg, .little) catch unreachable;
+                    const data = msg.data;
+                    switch (@typeInfo(@TypeOf(data))) {
+                        .void => {},
+                        .int => {
+                            writer.writeInt(@TypeOf(data), data, .little) catch unreachable;
+                        },
+                        .@"struct" => {
+                            data.encode(writer) catch unreachable;
+                        },
+                        else => @compileError("Not impl!"),
+                    }
                 },
             }
 
@@ -70,9 +80,21 @@ pub fn Channel(Context_: type) type {
             const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
             switch (tag) {
                 inline else => |t| {
-                    const PayloadT = std.meta.TagPayload(T, t);
-                    const payload = reader.takeStruct(PayloadT, .little) catch unreachable;
-                    return @unionInit(T, @tagName(t), payload);
+                    const Data = @FieldType(std.meta.TagPayload(T, t), "data");
+                    switch (@typeInfo(Data)) {
+                        .void => {
+                            return @unionInit(T, @tagName(t), .{ .data = {} });
+                        },
+                        .int => {
+                            const data = reader.takeInt(Data, .little) catch unreachable;
+                            return @unionInit(T, @tagName(t), .{ .data = data });
+                        },
+                        .@"struct" => {
+                            const data = Data.decode(reader) catch unreachable;
+                            return @unionInit(T, @tagName(t), .{ .data = data });
+                        },
+                        else => @compileError("Not impl!"),
+                    }
                 },
             }
         }
