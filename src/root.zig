@@ -77,7 +77,7 @@ pub fn reachableStates(comptime FsmState: type) struct { states: []const type, s
         var state_machine_names: []const []const u8 = &.{FsmState.name};
         var states_stack: []const type = &.{FsmState};
         var states_set: TypeSet(128) = .init;
-        const ExpectedContext = ContextFromState(FsmState.State);
+        const ExpectedContext = ContextFromState(FsmState.State, FsmState.State.agency);
 
         states_set.insert(FsmState.State);
 
@@ -117,7 +117,7 @@ fn reachableStatesDepthFirstSearch(
                     if (!states_set.has(NextState)) {
                         // Validate that the handler context type matches (skip for special states like Exit)
                         if (NextState != Exit) {
-                            const NextContext = ContextFromState(NextState);
+                            const NextContext = ContextFromState(NextState, NextState.agency);
                             if (NextContext.client != ExpectedContext.client or NextContext.server != ExpectedContext.server) {
                                 @compileError(std.fmt.comptimePrint("Context type mismatch: State {s} has context type {s}, but expected {s}", .{ @typeName(NextState), @typeName(NextContext), @typeName(ExpectedContext) }));
                             }
@@ -142,14 +142,12 @@ pub const ClientAndServerContext = struct {
     server: type,
 };
 
-pub fn ContextFromState(comptime State: type) ClientAndServerContext {
+pub fn ContextFromState(comptime State: type, agency: Role) ClientAndServerContext {
     const process_context =
         @typeInfo(@typeInfo(@TypeOf(State.process)).@"fn".params[0].type.?).pointer.child;
 
     const preprocess_context =
         @typeInfo(@typeInfo(@TypeOf(State.preprocess)).@"fn".params[0].type.?).pointer.child;
-
-    const agency: Role = State.agency;
 
     return switch (agency) {
         .client => .{ .client = process_context, .server = preprocess_context },
@@ -211,7 +209,7 @@ pub fn Runner(
     comptime FsmState: type,
 ) type {
     return struct {
-        pub const Context = ContextFromState(FsmState.State);
+        pub const Context = ContextFromState(FsmState.State, FsmState.State.agency);
         pub const state_map: StateMap = .init(FsmState);
         pub const StateId = state_map.StateId;
 
@@ -266,28 +264,26 @@ pub fn Runner(
 
 pub fn Cast(
     comptime Label_: []const u8,
-    comptime Protocol: fn (type, type) type,
-    comptime Msg: type,
-    comptime NextState: type,
     comptime agency_: Role,
-    comptime Context_: ClientAndServerContext,
-    comptime process_fun: fn (*@field(Context_, @tagName(agency_))) Msg,
-    comptime preprocess_fun: fn (*@field(Context_, @tagName(agency_.flip())), Msg) void,
+    comptime CastFn: type,
+    comptime NextFsmState: type,
 ) type {
     return union(enum) {
-        cast: Protocol(Msg, NextState),
+        cast: NextFsmState,
 
         pub const Label = Label_;
 
         pub const agency: Role = agency_;
 
-        pub fn process(ctx: *@field(Context_, @tagName(agency_))) @This() {
-            return .{ .cast = .{ .data = process_fun(ctx) } };
+        const ConfigContext = ContextFromState(CastFn, agency);
+
+        pub fn process(ctx: *@field(ConfigContext, @tagName(agency))) @This() {
+            return .{ .cast = .{ .data = CastFn.process(ctx) } };
         }
 
-        pub fn preprocess(ctx: *@field(Context_, @tagName(agency_.flip())), msg: @This()) void {
+        pub fn preprocess(ctx: *@field(ConfigContext, @tagName(agency.flip())), msg: @This()) void {
             switch (msg) {
-                .cast => |val| preprocess_fun(ctx, val.data),
+                .cast => |val| CastFn.preprocess(ctx, val.data),
             }
         }
     };

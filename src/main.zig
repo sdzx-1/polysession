@@ -126,17 +126,19 @@ pub const Context: ps.ClientAndServerContext = .{
     .server = ServerContext,
 };
 
-fn pong_process(ctx: *ServerContext) i32 {
-    ctx.server_counter += 1;
-    return ctx.server_counter;
-}
+const PongFn = struct {
+    pub fn process(ctx: *ServerContext) i32 {
+        ctx.server_counter += 1;
+        return ctx.server_counter;
+    }
 
-fn pong_preprocess(ctx: *ClientContext, val: i32) void {
-    ctx.client_counter = val;
-}
+    pub fn preprocess(ctx: *ClientContext, val: i32) void {
+        ctx.client_counter = val;
+    }
+};
 
 const St = union(enum) {
-    ping: PingPong(i32, ps.Cast("pong", PingPong, i32, @This(), .server, Context, pong_process, pong_preprocess)),
+    ping: PingPong(i32, ps.Cast("pong", .server, PongFn, PingPong(i32, @This()))),
     exit: PingPong(void, ps.Exit),
 
     pub const agency: ps.Role = .client;
@@ -159,3 +161,9 @@ const EnterFsmState = PingPong(void, St);
 
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);
+
+const ProtocolFamily = union(enum) {
+    pingpong0: PingPong(void, St),
+    pingpong1: PingPong(void, St),
+    pingpong2: PingPong(void, St),
+};
