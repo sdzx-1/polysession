@@ -227,7 +227,7 @@ pub fn Runner(
             log_msg: bool,
             curr_id: StateId,
             ctx: *@field(Context, @tagName(role)),
-        ) void {
+        ) !void {
             @setEvalBranchQuota(10_000_000);
             sw: switch (curr_id) {
                 inline else => |state_id| {
@@ -236,16 +236,16 @@ pub fn Runner(
 
                     const result = blk: {
                         if (comptime State.agency == role) {
-                            const res = State.process(ctx);
-                            channel.send(ctx, res);
+                            const res = try State.process(ctx);
+                            try channel.send(ctx, state_id, res);
                             if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                             if (log_msg) std.debug.print("{t} send msg {any}\n", .{ role, res });
                             break :blk res;
                         } else {
-                            const res = channel.recv(ctx, State);
+                            const res = try channel.recv(ctx, state_id, State);
                             if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                             if (log_msg) std.debug.print("{t} recv msg {any}\n", .{ role, res });
-                            State.preprocess(ctx, res);
+                            try State.preprocess(ctx, res);
                             break :blk res;
                         }
                     };
@@ -277,13 +277,13 @@ pub fn Cast(
 
         const ConfigContext = ContextFromState(CastFn, agency);
 
-        pub fn process(ctx: *@field(ConfigContext, @tagName(agency))) @This() {
-            return .{ .cast = .{ .data = CastFn.process(ctx) } };
+        pub fn process(ctx: *@field(ConfigContext, @tagName(agency))) !@This() {
+            return .{ .cast = .{ .data = try CastFn.process(ctx) } };
         }
 
-        pub fn preprocess(ctx: *@field(ConfigContext, @tagName(agency.flip())), msg: @This()) void {
+        pub fn preprocess(ctx: *@field(ConfigContext, @tagName(agency.flip())), msg: @This()) !void {
             switch (msg) {
-                .cast => |val| CastFn.preprocess(ctx, val.data),
+                .cast => |val| try CastFn.preprocess(ctx, val.data),
             }
         }
     };
