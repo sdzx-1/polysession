@@ -19,26 +19,21 @@ pub fn main() !void {
             var reader_buf: [16]u8 = undefined;
             var writer_buf: [16]u8 = undefined;
 
+            var stream_reader = socket.reader(&reader_buf);
+            var stream_writer = socket.writer(&writer_buf);
+
             var client_context: ClientContext = .{
-                .stream_reader = socket.reader(&reader_buf),
-                .stream_writer = socket.writer(&writer_buf),
                 .client_counter = 0,
             };
 
-            try Runner.runProtocol(.client, Channel(ClientContext), true, curr_id, &client_context);
-            // catch |err| {
-            // std.debug.print("err: {any}\n", .{err});
-            // const tt = @typeInfo(@TypeOf(err)).error_set;
-            // @compileLog(tt);
-            //
-            //
-            // @as(?[]const builtin.Type.Error, &.{
-            // .{ .name = "WriteFailed"[0..11] },
-            // .{ .name = "ReadFailed"[0..10] },
-            // .{ .name = "EndOfStream"[0..11] },
-            // .{ .name = "IncorrectStatusReceived"[0..23] },
-            // .{ .name = "TestError"[0..9] } }[0..5])        }
-            // };
+            try Runner.runProtocol(
+                .client,
+                Codec,
+                ps.Channel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
+                true,
+                curr_id,
+                &client_context,
+            );
         }
     };
 
@@ -53,87 +48,77 @@ pub fn main() !void {
     var reader_buf: [16]u8 = undefined;
     var writer_buf: [16]u8 = undefined;
 
+    var stream_reader = client.stream.reader(&reader_buf);
+    var stream_writer = client.stream.writer(&writer_buf);
+
     var server_context: ServerContext = .{
-        .stream_reader = client.stream.reader(&reader_buf),
-        .stream_writer = client.stream.writer(&writer_buf),
         .server_counter = 0,
     };
 
-    try Runner.runProtocol(.server, Channel(ServerContext), true, curr_id, &server_context);
-    // catch |err| {
-    // std.debug.print("err: {any}\n", .{err});
+    const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
+        .server,
+        Codec,
+        ps.Channel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
+        true,
+        curr_id,
+        &server_context,
+    });
 
-    // const tt = @typeInfo(@TypeOf(err)).error_set;
-    // @compileLog(tt);
-    //
-    //
-    // @as(?[]const builtin.Type.Error, &.{
-    // .{ .name = "WriteFailed"[0..11] },
-    // .{ .name = "ReadFailed"[0..10] },
-    // .{ .name = "EndOfStream"[0..11] },
-    // .{ .name = "IncorrectStatusReceived"[0..23] } }[0..4])
-    // };
-
-    const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{ .server, Channel(ServerContext), true, curr_id, &server_context });
     defer stid.join();
 }
 
-pub fn Channel(Context_: type) type {
-    return struct {
-        pub fn send(ctx: *Context_, state_id: anytype, val: anytype) !void {
-            const writer = &ctx.stream_writer.interface;
-            const id: u8 = @intFromEnum(state_id);
-            switch (val) {
-                inline else => |msg, tag| {
-                    try writer.writeByte(id);
-                    try writer.writeByte(@intFromEnum(tag));
-                    const data = msg.data;
-                    switch (@typeInfo(@TypeOf(data))) {
-                        .void => {},
-                        .int => {
-                            try writer.writeInt(@TypeOf(data), data, .little);
-                        },
-                        .@"struct" => {
-                            try data.encode(writer);
-                        },
-                        else => @compileError("Not impl!"),
-                    }
-                },
-            }
-
-            try writer.flush();
+pub const Codec = struct {
+    pub fn encode(writer: *std.Io.Writer, state_id: anytype, val: anytype) !void {
+        const id: u8 = @intFromEnum(state_id);
+        switch (val) {
+            inline else => |msg, tag| {
+                try writer.writeByte(id);
+                try writer.writeByte(@intFromEnum(tag));
+                const data = msg.data;
+                switch (@typeInfo(@TypeOf(data))) {
+                    .void => {},
+                    .int => {
+                        try writer.writeInt(@TypeOf(data), data, .little);
+                    },
+                    .@"struct" => {
+                        try data.encode(writer);
+                    },
+                    else => @compileError("Not impl!"),
+                }
+            },
         }
 
-        pub fn recv(ctx: *Context_, state_id: anytype, T: type) !T {
-            const reader = ctx.stream_reader.interface();
-            const id: u8 = @intFromEnum(state_id);
-            const sid = try reader.takeByte();
-            std.debug.assert(id == sid);
-            if (id != sid) return error.IncorrectStatusReceived;
-            const recv_tag_num = try reader.takeByte();
-            const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
-            switch (tag) {
-                inline else => |t| {
-                    const Data = @FieldType(std.meta.TagPayload(T, t), "data");
-                    switch (@typeInfo(Data)) {
-                        .void => {
-                            return @unionInit(T, @tagName(t), .{ .data = {} });
-                        },
-                        .int => {
-                            const data = try reader.takeInt(Data, .little);
-                            return @unionInit(T, @tagName(t), .{ .data = data });
-                        },
-                        .@"struct" => {
-                            const data = try Data.decode(reader);
-                            return @unionInit(T, @tagName(t), .{ .data = data });
-                        },
-                        else => @compileError("Not impl!"),
-                    }
-                },
-            }
+        try writer.flush();
+    }
+
+    pub fn decode(reader: *std.Io.Reader, state_id: anytype, T: type) !T {
+        const id: u8 = @intFromEnum(state_id);
+        const sid = try reader.takeByte();
+        std.debug.assert(id == sid);
+        if (id != sid) return error.IncorrectStatusReceived;
+        const recv_tag_num = try reader.takeByte();
+        const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
+        switch (tag) {
+            inline else => |t| {
+                const Data = @FieldType(std.meta.TagPayload(T, t), "data");
+                switch (@typeInfo(Data)) {
+                    .void => {
+                        return @unionInit(T, @tagName(t), .{ .data = {} });
+                    },
+                    .int => {
+                        const data = try reader.takeInt(Data, .little);
+                        return @unionInit(T, @tagName(t), .{ .data = data });
+                    },
+                    .@"struct" => {
+                        const data = try Data.decode(reader);
+                        return @unionInit(T, @tagName(t), .{ .data = data });
+                    },
+                    else => @compileError("Not impl!"),
+                }
+            },
         }
-    };
-}
+    }
+};
 
 //example PingPong
 
@@ -142,16 +127,10 @@ pub fn PingPong(Data_: type, State_: type) type {
 }
 
 pub const ServerContext = struct {
-    stream_writer: net.Stream.Writer,
-    stream_reader: net.Stream.Reader,
-
     server_counter: i32,
 };
 
 pub const ClientContext = struct {
-    stream_writer: net.Stream.Writer,
-    stream_reader: net.Stream.Reader,
-
     client_counter: i32,
 };
 
@@ -179,7 +158,7 @@ const St = union(enum) {
 
     pub fn process(ctx: *ClientContext) !@This() {
         ctx.client_counter += 1;
-        if (ctx.client_counter > 10) return error.TestError;
+        // if (ctx.client_counter > 10) return error.TestError;
         if (ctx.client_counter >= 20) return .{ .exit = .{ .data = {} } };
         return .{ .ping = .{ .data = ctx.client_counter } };
     }
@@ -197,8 +176,17 @@ const EnterFsmState = PingPong(void, St);
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);
 
-const ProtocolFamily = union(enum) {
-    pingpong0: PingPong(void, St),
-    pingpong1: PingPong(void, St),
-    pingpong2: PingPong(void, St),
-};
+// const ProtocolFamily = union(enum) {
+//     pingpong0: PingPong(void, St),
+//     pingpong1: PingPong(void, St),
+//     pingpong2: PingPong(void, St),
+// };
+
+// pub const Mux = struct {
+//     reader: *std.Io.Reader,
+//     reader_mutex: std.Thread.Mutex,
+//     reader_single: std.Thread.Condition,
+
+//     writer: *std.Io.Writer,
+//     writer_mutex: std.Thread.Mutex,
+// };
