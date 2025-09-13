@@ -224,7 +224,7 @@ pub fn Runner(
         pub fn runProtocol(
             comptime role: Role,
             comptime codec: type,
-            channel: Channel,
+            channel: anytype,
             log_msg: bool,
             curr_id: StateId,
             ctx: *@field(Context, @tagName(role)),
@@ -238,14 +238,14 @@ pub fn Runner(
                     const result = blk: {
                         if (comptime State.agency == role) {
                             const res = try State.process(ctx);
-                            try codec.encode(channel.writer, state_id, res);
+                            try codec.encode(channel.get_writer(), state_id, res);
                             {
                                 if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                                 if (log_msg) std.debug.print("{t} send msg {any}\n", .{ role, res });
                             }
                             break :blk res;
                         } else {
-                            const res = try codec.decode(channel.reader, state_id, State);
+                            const res = try codec.decode(channel.get_reader(), state_id, State);
                             {
                                 if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                                 if (log_msg) std.debug.print("{t} recv msg {any}\n", .{ role, res });
@@ -293,8 +293,3 @@ pub fn Cast(
         }
     };
 }
-
-pub const Channel = struct {
-    writer: *std.Io.Writer,
-    reader: *std.Io.Reader,
-};

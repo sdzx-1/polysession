@@ -29,7 +29,7 @@ pub fn main() !void {
             try Runner.runProtocol(
                 .client,
                 Codec,
-                ps.Channel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
+                SimpleChannel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
                 true,
                 curr_id,
                 &client_context,
@@ -58,7 +58,7 @@ pub fn main() !void {
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
         .server,
         Codec,
-        ps.Channel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
+        SimpleChannel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
         true,
         curr_id,
         &server_context,
@@ -175,6 +175,19 @@ const EnterFsmState = PingPong(void, St);
 
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);
+
+const SimpleChannel = struct {
+    writer: *std.Io.Writer,
+    reader: *std.Io.Reader,
+
+    pub fn get_reader(self: @This()) *std.Io.Reader {
+        return self.reader;
+    }
+
+    pub fn get_writer(self: @This()) *std.Io.Writer {
+        return self.writer;
+    }
+};
 
 // const ProtocolFamily = union(enum) {
 //     pingpong0: PingPong(void, St),
