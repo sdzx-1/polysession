@@ -189,6 +189,46 @@ const SimpleChannel = struct {
     }
 };
 
+//https://hackage.haskell.org/package/base-4.21.0.0/docs/Control-Concurrent-MVar.html
+pub fn MVar(T: type) type {
+    return struct {
+        mutex: std.Thread.Mutex = .{},
+        cond_a: std.Thread.Condition = .{},
+        cond_b: std.Thread.Condition = .{},
+
+        state: MVarState = .empty,
+        data: T = undefined,
+
+        pub const MVarState = enum { full, empty };
+
+        pub fn get(self: *@This()) T {
+            self.mutex.lock();
+
+            while (self.state == .empty) {
+                self.cond_a.wait(&self.mutex);
+            }
+
+            self.state = .empty;
+            const val = self.data;
+            self.mutex.unlock();
+            self.cond_b.signal();
+            return val;
+        }
+
+        pub fn put(self: *@This(), val: T) void {
+            self.mutex.lock();
+
+            while (self.state == .full) {
+                self.cond_b.wait(&self.mutex);
+            }
+            self.state = .full;
+            self.data = val;
+            self.mutex.unlock();
+            self.cond_a.signal();
+        }
+    };
+}
+
 // const ProtocolFamily = union(enum) {
 //     pingpong0: PingPong(void, St),
 //     pingpong1: PingPong(void, St),
