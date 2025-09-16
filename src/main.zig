@@ -5,13 +5,12 @@ const net = std.net;
 pub fn main() !void {
     var buffA: [50]u8 = @splat(0);
     var buffB: [50]u8 = @splat(0);
-    var mvar_channel: MvarChannel = .{
-        .buffA = &buffA,
-        .sizeA = 0,
 
-        .buffB = &buffB,
-        .sizeB = 0,
-    };
+    var mvarA: Mvar = .{ .buff = &buffA, .size = 0 };
+    var mvarB: Mvar = .{ .buff = &buffB, .size = 0 };
+
+    var client_channel: MvarChannel = .{ .mvar_a = &mvarA, .mvar_b = &mvarB };
+    var server_channel: MvarChannel = .{ .mvar_a = &mvarB, .mvar_b = &mvarA };
 
     const S = struct {
         fn clientFn(mv_channel: *MvarChannel) !void {
@@ -19,17 +18,11 @@ pub fn main() !void {
                 .client_counter = 0,
             };
 
-            try Runner.runProtocol(
-                .client,
-                &mv_channel,
-                true,
-                curr_id,
-                &client_context,
-            );
+            try Runner.runProtocol(.client, &mv_channel, true, curr_id, &client_context);
         }
     };
 
-    const t = try std.Thread.spawn(.{}, S.clientFn, .{&mvar_channel});
+    const t = try std.Thread.spawn(.{}, S.clientFn, .{&client_channel});
     defer t.join();
 
     //
@@ -37,14 +30,7 @@ pub fn main() !void {
         .server_counter = 0,
     };
 
-    const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
-        .server,
-        &mvar_channel,
-        true,
-        curr_id,
-        &server_context,
-    });
-
+    const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{ .server, &server_channel, true, curr_id, &server_context });
     defer stid.join();
 }
 
@@ -97,6 +83,62 @@ pub const Codec = struct {
                 }
             },
         }
+    }
+};
+
+pub const MvarChannel = struct {
+    mvar_a: *Mvar,
+    mvar_b: *Mvar,
+
+    pub fn recv(self: *@This(), state_id: anytype, T: type) !T {
+        return try self.mvar_a.recv(state_id, T);
+    }
+
+    pub fn send(self: *@This(), state_id: anytype, val: anytype) !void {
+        try self.mvar_b.send(state_id, val);
+    }
+};
+
+pub const Mvar = struct {
+    mutex: std.Thread.Mutex = .{},
+    cond: std.Thread.Condition = .{},
+
+    state: MvarState = .empty,
+    buff: []u8,
+    size: usize,
+
+    pub const MvarState = enum { full, empty };
+
+    pub fn recv(self: *@This(), state_id: anytype, T: type) !T {
+        self.mutex.lock();
+
+        while (self.state == .empty) {
+            self.cond.wait(&self.mutex);
+        }
+
+        var reader = std.Io.Reader.fixed(self.buff);
+        const val = try Codec.decode(&reader, state_id, T);
+
+        self.state = .empty;
+        self.mutex.unlock();
+        self.cond.signal();
+        return val;
+    }
+
+    pub fn send(self: *@This(), state_id: anytype, val: anytype) !void {
+        self.mutex.lock();
+
+        while (self.state == .full) {
+            self.cond.wait(&self.mutex);
+        }
+
+        var writer = std.Io.Writer.fixed(self.buff);
+        try Codec.encode(&writer, state_id, val);
+        self.size = writer.buffered().len;
+
+        self.state = .full;
+        self.mutex.unlock();
+        self.cond.signal();
     }
 };
 
@@ -155,88 +197,6 @@ const EnterFsmState = PingPong(void, St);
 
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);
-
-pub const MvarChannel = struct {
-    mutexA: std.Thread.Mutex = .{},
-    condA: std.Thread.Condition = .{},
-
-    stateA: MVarState = .empty,
-    buffA: []u8,
-    sizeA: usize,
-
-    mutexB: std.Thread.Mutex = .{},
-    condB: std.Thread.Condition = .{},
-
-    stateB: MVarState = .empty,
-    buffB: []u8,
-    sizeB: usize,
-
-    pub const MVarState = enum { full, empty };
-
-    pub fn server_recv(self: *@This(), state_id: anytype, T: type) !T {
-        self.mutexA.lock();
-
-        while (self.stateA == .empty) {
-            self.condA.wait(&self.mutexA);
-        }
-
-        var reader = std.Io.Reader.fixed(self.buffA);
-        const val = try Codec.decode(&reader, state_id, T);
-
-        self.stateA = .empty;
-        self.mutexA.unlock();
-        self.condA.signal();
-        return val;
-    }
-
-    pub fn client_send(self: *@This(), state_id: anytype, val: anytype) !void {
-        self.mutexA.lock();
-
-        while (self.stateA == .full) {
-            self.condA.wait(&self.mutexA);
-        }
-
-        var writer = std.Io.Writer.fixed(self.buffA);
-        try Codec.encode(&writer, state_id, val);
-        self.sizeA = writer.buffered().len;
-
-        self.stateA = .full;
-        self.mutexA.unlock();
-        self.condA.signal();
-    }
-
-    pub fn client_recv(self: *@This(), state_id: anytype, T: type) !T {
-        self.mutexB.lock();
-
-        while (self.stateB == .empty) {
-            self.condB.wait(&self.mutexB);
-        }
-
-        var reader = std.Io.Reader.fixed(self.buffB);
-        const val = try Codec.decode(&reader, state_id, T);
-
-        self.stateB = .empty;
-        self.mutexB.unlock();
-        self.condB.signal();
-        return val;
-    }
-
-    pub fn server_send(self: *@This(), state_id: anytype, val: anytype) !void {
-        self.mutexB.lock();
-
-        while (self.stateB == .full) {
-            self.condB.wait(&self.mutexB);
-        }
-
-        var writer = std.Io.Writer.fixed(self.buffB);
-        try Codec.encode(&writer, state_id, val);
-        self.sizeB = writer.buffered().len;
-
-        self.stateB = .full;
-        self.mutexB.unlock();
-        self.condB.signal();
-    }
-};
 
 // const ProtocolFamily = union(enum) {
 //     pingpong0: PingPong(void, St),

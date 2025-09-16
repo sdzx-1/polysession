@@ -264,25 +264,14 @@ pub fn Runner(
                     const result = blk: {
                         if (comptime State.agency == role) {
                             const res = try State.process(ctx);
-                            if (role == .client) {
-                                try channel.*.client_send(state_id, res);
-                            } else {
-                                try channel.*.server_send(state_id, res);
-                            }
+                            try channel.*.send(state_id, res);
                             {
                                 if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                                 if (log_msg) std.debug.print("{t} send msg {any}\n", .{ role, res });
                             }
                             break :blk res;
                         } else {
-                            const res = blk1: {
-                                if (role == .client) {
-                                    break :blk1 try channel.*.client_recv(state_id, State);
-                                } else {
-                                    break :blk1 try channel.*.server_recv(state_id, State);
-                                }
-                            };
-
+                            const res = try channel.*.recv(state_id, State);
                             {
                                 if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                                 if (log_msg) std.debug.print("{t} recv msg {any}\n", .{ role, res });
