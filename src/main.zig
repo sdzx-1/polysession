@@ -3,33 +3,25 @@ const ps = @import("root.zig");
 const net = std.net;
 
 pub fn main() !void {
+    var buffA: [50]u8 = @splat(0);
+    var buffB: [50]u8 = @splat(0);
+    var mvar_channel: MvarChannel = .{
+        .buffA = &buffA,
+        .sizeA = 0,
 
-    //Server
-    const localhost = try net.Address.parseIp("127.0.0.1", 0);
-
-    var server = try localhost.listen(.{});
-    defer server.deinit();
-    //
+        .buffB = &buffB,
+        .sizeB = 0,
+    };
 
     const S = struct {
-        fn clientFn(server_address: net.Address) !void {
-            const socket = try net.tcpConnectToAddress(server_address);
-            defer socket.close();
-
-            var reader_buf: [16]u8 = undefined;
-            var writer_buf: [16]u8 = undefined;
-
-            var stream_reader = socket.reader(&reader_buf);
-            var stream_writer = socket.writer(&writer_buf);
-
+        fn clientFn(mv_channel: *MvarChannel) !void {
             var client_context: ClientContext = .{
                 .client_counter = 0,
             };
 
             try Runner.runProtocol(
                 .client,
-                Codec,
-                SimpleChannel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
+                &mv_channel,
                 true,
                 curr_id,
                 &client_context,
@@ -37,28 +29,17 @@ pub fn main() !void {
         }
     };
 
-    const t = try std.Thread.spawn(.{}, S.clientFn, .{server.listen_address});
+    const t = try std.Thread.spawn(.{}, S.clientFn, .{&mvar_channel});
     defer t.join();
 
     //
-
-    var client = try server.accept();
-    defer client.stream.close();
-
-    var reader_buf: [16]u8 = undefined;
-    var writer_buf: [16]u8 = undefined;
-
-    var stream_reader = client.stream.reader(&reader_buf);
-    var stream_writer = client.stream.writer(&writer_buf);
-
     var server_context: ServerContext = .{
         .server_counter = 0,
     };
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
         .server,
-        Codec,
-        SimpleChannel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
+        &mvar_channel,
         true,
         curr_id,
         &server_context,
@@ -94,7 +75,6 @@ pub const Codec = struct {
     pub fn decode(reader: *std.Io.Reader, state_id: anytype, T: type) !T {
         const id: u8 = @intFromEnum(state_id);
         const sid = try reader.takeByte();
-        std.debug.assert(id == sid);
         if (id != sid) return error.IncorrectStatusReceived;
         const recv_tag_num = try reader.takeByte();
         const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
@@ -176,58 +156,87 @@ const EnterFsmState = PingPong(void, St);
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);
 
-const SimpleChannel = struct {
-    writer: *std.Io.Writer,
-    reader: *std.Io.Reader,
+pub const MvarChannel = struct {
+    mutexA: std.Thread.Mutex = .{},
+    condA: std.Thread.Condition = .{},
 
-    pub fn get_reader(self: @This()) *std.Io.Reader {
-        return self.reader;
+    stateA: MVarState = .empty,
+    buffA: []u8,
+    sizeA: usize,
+
+    mutexB: std.Thread.Mutex = .{},
+    condB: std.Thread.Condition = .{},
+
+    stateB: MVarState = .empty,
+    buffB: []u8,
+    sizeB: usize,
+
+    pub const MVarState = enum { full, empty };
+
+    pub fn server_recv(self: *@This(), state_id: anytype, T: type) !T {
+        self.mutexA.lock();
+
+        while (self.stateA == .empty) {
+            self.condA.wait(&self.mutexA);
+        }
+
+        var reader = std.Io.Reader.fixed(self.buffA);
+        const val = try Codec.decode(&reader, state_id, T);
+
+        self.stateA = .empty;
+        self.mutexA.unlock();
+        self.condA.signal();
+        return val;
     }
 
-    pub fn get_writer(self: @This()) *std.Io.Writer {
-        return self.writer;
+    pub fn client_send(self: *@This(), state_id: anytype, val: anytype) !void {
+        self.mutexA.lock();
+
+        while (self.stateA == .full) {
+            self.condA.wait(&self.mutexA);
+        }
+
+        var writer = std.Io.Writer.fixed(self.buffA);
+        try Codec.encode(&writer, state_id, val);
+        self.sizeA = writer.buffered().len;
+
+        self.stateA = .full;
+        self.mutexA.unlock();
+        self.condA.signal();
+    }
+
+    pub fn client_recv(self: *@This(), state_id: anytype, T: type) !T {
+        self.mutexB.lock();
+
+        while (self.stateB == .empty) {
+            self.condB.wait(&self.mutexB);
+        }
+
+        var reader = std.Io.Reader.fixed(self.buffB);
+        const val = try Codec.decode(&reader, state_id, T);
+
+        self.stateB = .empty;
+        self.mutexB.unlock();
+        self.condB.signal();
+        return val;
+    }
+
+    pub fn server_send(self: *@This(), state_id: anytype, val: anytype) !void {
+        self.mutexB.lock();
+
+        while (self.stateB == .full) {
+            self.condB.wait(&self.mutexB);
+        }
+
+        var writer = std.Io.Writer.fixed(self.buffB);
+        try Codec.encode(&writer, state_id, val);
+        self.sizeB = writer.buffered().len;
+
+        self.stateB = .full;
+        self.mutexB.unlock();
+        self.condB.signal();
     }
 };
-
-//https://hackage.haskell.org/package/base-4.21.0.0/docs/Control-Concurrent-MVar.html
-pub fn MVar(T: type) type {
-    return struct {
-        mutex: std.Thread.Mutex = .{},
-        cond_a: std.Thread.Condition = .{},
-        cond_b: std.Thread.Condition = .{},
-
-        state: MVarState = .empty,
-        data: T = undefined,
-
-        pub const MVarState = enum { full, empty };
-
-        pub fn get(self: *@This()) T {
-            self.mutex.lock();
-
-            while (self.state == .empty) {
-                self.cond_a.wait(&self.mutex);
-            }
-
-            self.state = .empty;
-            const val = self.data;
-            self.mutex.unlock();
-            self.cond_b.signal();
-            return val;
-        }
-
-        pub fn put(self: *@This(), val: T) void {
-            self.mutex.lock();
-
-            while (self.state == .full) {
-                self.cond_b.wait(&self.mutex);
-            }
-            self.state = .full;
-            self.data = val;
-            self.mutex.unlock();
-            self.cond_a.signal();
-        }
-    };
-}
 
 // const ProtocolFamily = union(enum) {
 //     pingpong0: PingPong(void, St),

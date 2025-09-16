@@ -30,6 +30,33 @@ pub const Role = enum {
     }
 };
 
+pub fn Cast(
+    comptime Label_: []const u8,
+    comptime agency_: Role,
+    comptime CastFn: type,
+    comptime NextFsmState: type,
+) type {
+    return union(enum) {
+        cast: NextFsmState,
+
+        pub const Label = Label_;
+
+        pub const agency: Role = agency_;
+
+        const ConfigContext = ContextFromState(CastFn, agency);
+
+        pub fn process(ctx: *@field(ConfigContext, @tagName(agency))) !@This() {
+            return .{ .cast = .{ .data = try CastFn.process(ctx) } };
+        }
+
+        pub fn preprocess(ctx: *@field(ConfigContext, @tagName(agency.flip())), msg: @This()) !void {
+            switch (msg) {
+                .cast => |val| try CastFn.preprocess(ctx, val.data),
+            }
+        }
+    };
+}
+
 // Runner impl
 fn TypeSet(comptime bucket_count: usize) type {
     return struct {
@@ -223,7 +250,6 @@ pub fn Runner(
 
         pub fn runProtocol(
             comptime role: Role,
-            comptime codec: type,
             channel: anytype,
             log_msg: bool,
             curr_id: StateId,
@@ -238,14 +264,25 @@ pub fn Runner(
                     const result = blk: {
                         if (comptime State.agency == role) {
                             const res = try State.process(ctx);
-                            try codec.encode(channel.get_writer(), state_id, res);
+                            if (role == .client) {
+                                try channel.*.client_send(state_id, res);
+                            } else {
+                                try channel.*.server_send(state_id, res);
+                            }
                             {
                                 if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                                 if (log_msg) std.debug.print("{t} send msg {any}\n", .{ role, res });
                             }
                             break :blk res;
                         } else {
-                            const res = try codec.decode(channel.get_reader(), state_id, State);
+                            const res = blk1: {
+                                if (role == .client) {
+                                    break :blk1 try channel.*.client_recv(state_id, State);
+                                } else {
+                                    break :blk1 try channel.*.server_recv(state_id, State);
+                                }
+                            };
+
                             {
                                 if (log_msg and @hasDecl(State, "Label")) std.debug.print("Label: {s}, ", .{State.Label});
                                 if (log_msg) std.debug.print("{t} recv msg {any}\n", .{ role, res });
@@ -262,33 +299,6 @@ pub fn Runner(
                         },
                     }
                 },
-            }
-        }
-    };
-}
-
-pub fn Cast(
-    comptime Label_: []const u8,
-    comptime agency_: Role,
-    comptime CastFn: type,
-    comptime NextFsmState: type,
-) type {
-    return union(enum) {
-        cast: NextFsmState,
-
-        pub const Label = Label_;
-
-        pub const agency: Role = agency_;
-
-        const ConfigContext = ContextFromState(CastFn, agency);
-
-        pub fn process(ctx: *@field(ConfigContext, @tagName(agency))) !@This() {
-            return .{ .cast = .{ .data = try CastFn.process(ctx) } };
-        }
-
-        pub fn preprocess(ctx: *@field(ConfigContext, @tagName(agency.flip())), msg: @This()) !void {
-            switch (msg) {
-                .cast => |val| try CastFn.preprocess(ctx, val.data),
             }
         }
     };
