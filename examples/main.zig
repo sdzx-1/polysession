@@ -30,8 +30,11 @@ pub fn main() !void {
 
             try Runner.runProtocol(
                 .client,
-                StreamChannel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
-                true,
+                StreamChannel{
+                    .reader = stream_reader.interface(),
+                    .writer = &stream_writer.interface,
+                    .log = false,
+                },
                 curr_id,
                 &client_context,
             );
@@ -58,8 +61,11 @@ pub fn main() !void {
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
         .server,
-        StreamChannel{ .reader = stream_reader.interface(), .writer = &stream_writer.interface },
-        true,
+        StreamChannel{
+            .reader = stream_reader.interface(),
+            .writer = &stream_writer.interface,
+            .log = true,
+        },
         curr_id,
         &server_context,
     });
@@ -97,27 +103,34 @@ const PongFn = struct {
     }
 };
 
-const St = union(enum) {
-    ping: PingPong(i32, ps.Cast("pong", .server, PongFn, PingPong(i32, @This()))),
-    exit: PingPong(void, ps.Exit),
+pub fn Start(NextFsmState: type) type {
+    return union(enum) {
+        ping: PingPong(i32, ps.Cast("pong", .server, PongFn, PingPong(i32, @This()))),
+        next: NextFsmState,
 
-    pub const agency: ps.Role = .client;
+        pub const agency: ps.Role = .client;
 
-    pub fn process(ctx: *ClientContext) !@This() {
-        ctx.client_counter += 1;
-        if (ctx.client_counter >= 20) return .{ .exit = .{ .data = {} } };
-        return .{ .ping = .{ .data = ctx.client_counter } };
-    }
-
-    pub fn preprocess(ctx: *ServerContext, msg: @This()) !void {
-        switch (msg) {
-            .ping => |val| ctx.server_counter = val.data,
-            .exit => {},
+        pub fn process(ctx: *ClientContext) !@This() {
+            if (ctx.client_counter >= 10) {
+                ctx.client_counter = 0;
+                return .{ .next = .{ .data = {} } };
+            }
+            return .{ .ping = .{ .data = ctx.client_counter } };
         }
-    }
-};
 
-const EnterFsmState = PingPong(void, St);
+        pub fn preprocess(ctx: *ServerContext, msg: @This()) !void {
+            switch (msg) {
+                .ping => |val| ctx.server_counter = val.data,
+                .next => {
+                    ctx.server_counter = 0;
+                },
+            }
+        }
+    };
+}
+
+const EnterFsmState = PingPong(void, Start(PingPong(void, ps.Exit)));
+// const EnterFsmState = PingPong(void, Start(PingPong(void, Start(PingPong(void, ps.Exit)))));
 
 const Runner = ps.Runner(EnterFsmState);
 const curr_id = Runner.idFromState(EnterFsmState.State);

@@ -7,12 +7,16 @@ const net = std.net;
 pub const StreamChannel = struct {
     writer: *std.Io.Writer,
     reader: *std.Io.Reader,
+    log: bool = false,
 
     pub fn recv(self: @This(), state_id: anytype, T: type) !T {
-        return try Codec.decode(self.reader, state_id, T);
+        const res = try Codec.decode(self.reader, state_id, T);
+        if (self.log) std.debug.print("recv: {any}\n", .{res});
+        return res;
     }
 
     pub fn send(self: @This(), state_id: anytype, val: anytype) !void {
+        if (self.log) std.debug.print("send: {any}\n", .{val});
         try Codec.encode(self.writer, state_id, val);
     }
 };
