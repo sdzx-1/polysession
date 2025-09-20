@@ -11,6 +11,20 @@ const curr_id = core.curr_id;
 
 pub fn main() !void {
 
+    //create tmp dir
+    var tmp_dir_instance = std.testing.tmpDir(.{});
+    defer tmp_dir_instance.cleanup();
+    const tmp_dir = tmp_dir_instance.dir;
+
+    {
+        const read_file = try tmp_dir.createFile("test_read", .{});
+        defer read_file.close();
+        const str: [1024 * 1024]u8 = @splat(65);
+        for (0..1024) |_| {
+            try read_file.writeAll(&str);
+        }
+    }
+
     //Server
     const localhost = try net.Address.parseIp("127.0.0.1", 0);
 
@@ -19,18 +33,26 @@ pub fn main() !void {
     //
 
     const S = struct {
-        fn clientFn(server_address: net.Address) !void {
+        fn clientFn(server_address: net.Address, dir: std.fs.Dir) !void {
             const socket = try net.tcpConnectToAddress(server_address);
             defer socket.close();
 
-            var reader_buf: [16]u8 = undefined;
-            var writer_buf: [16]u8 = undefined;
+            var reader_buf: [1024 * 1024 * 2]u8 = undefined;
+            var writer_buf: [1024 * 1024 * 2]u8 = undefined;
 
             var stream_reader = socket.reader(&reader_buf);
             var stream_writer = socket.writer(&writer_buf);
 
+            const write_file = try dir.createFile("test_write", .{});
+            defer write_file.close();
+
+            var file_writer_buf: [1024 * 1024 * 2]u8 = undefined;
+
+            var file_writer = write_file.writer(&file_writer_buf);
+
             var client_context: ClientContext = .{
                 .client_counter = 0,
+                .writer = &file_writer.interface,
             };
 
             try Runner.runProtocol(
@@ -46,7 +68,7 @@ pub fn main() !void {
         }
     };
 
-    const t = try std.Thread.spawn(.{}, S.clientFn, .{server.listen_address});
+    const t = try std.Thread.spawn(.{}, S.clientFn, .{ server.listen_address, tmp_dir });
     defer t.join();
 
     //
@@ -54,14 +76,23 @@ pub fn main() !void {
     var client = try server.accept();
     defer client.stream.close();
 
-    var reader_buf: [16]u8 = undefined;
-    var writer_buf: [16]u8 = undefined;
+    var reader_buf: [1024 * 1024 * 2]u8 = undefined;
+    var writer_buf: [1024 * 1024 * 2]u8 = undefined;
 
     var stream_reader = client.stream.reader(&reader_buf);
     var stream_writer = client.stream.writer(&writer_buf);
 
+    var file_reader_buf: [1024 * 1024 * 2]u8 = undefined;
+
+    const read_file = try tmp_dir.openFile("test_read", .{});
+    defer read_file.close();
+
+    var file_reader = read_file.reader(&file_reader_buf);
+
     var server_context: ServerContext = .{
         .server_counter = 0,
+        .reader = &file_reader.interface,
+        .file_size = (try read_file.stat()).size,
     };
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
@@ -69,7 +100,7 @@ pub fn main() !void {
         StreamChannel{
             .reader = stream_reader.interface(),
             .writer = &stream_writer.interface,
-            .log = true,
+            .log = false,
         },
         curr_id,
         &server_context,
