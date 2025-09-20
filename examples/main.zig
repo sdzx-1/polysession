@@ -3,6 +3,11 @@ const ps = @import("polysession");
 const net = std.net;
 const channel = @import("channel.zig");
 const StreamChannel = channel.StreamChannel;
+const core = @import("core.zig");
+const ServerContext = core.ServerContext;
+const ClientContext = core.ClientContext;
+const Runner = core.Runner;
+const curr_id = core.curr_id;
 
 pub fn main() !void {
 
@@ -72,65 +77,3 @@ pub fn main() !void {
 
     defer stid.join();
 }
-
-//example PingPong
-
-pub fn PingPong(Data_: type, State_: type) type {
-    return ps.Session("PingPong", Data_, State_);
-}
-
-pub const ServerContext = struct {
-    server_counter: i32,
-};
-
-pub const ClientContext = struct {
-    client_counter: i32,
-};
-
-pub const Context: ps.ClientAndServerContext = .{
-    .client = ClientContext,
-    .server = ServerContext,
-};
-
-const PongFn = struct {
-    pub fn process(ctx: *ServerContext) !i32 {
-        ctx.server_counter += 1;
-        return ctx.server_counter;
-    }
-
-    pub fn preprocess(ctx: *ClientContext, val: i32) !void {
-        ctx.client_counter = val;
-    }
-};
-
-pub fn Start(NextFsmState: type) type {
-    return union(enum) {
-        ping: PingPong(i32, ps.Cast("pong", .server, PongFn, PingPong(i32, @This()))),
-        next: NextFsmState,
-
-        pub const agency: ps.Role = .client;
-
-        pub fn process(ctx: *ClientContext) !@This() {
-            if (ctx.client_counter >= 10) {
-                ctx.client_counter = 0;
-                return .{ .next = .{ .data = {} } };
-            }
-            return .{ .ping = .{ .data = ctx.client_counter } };
-        }
-
-        pub fn preprocess(ctx: *ServerContext, msg: @This()) !void {
-            switch (msg) {
-                .ping => |val| ctx.server_counter = val.data,
-                .next => {
-                    ctx.server_counter = 0;
-                },
-            }
-        }
-    };
-}
-
-const EnterFsmState = PingPong(void, Start(PingPong(void, ps.Exit)));
-// const EnterFsmState = PingPong(void, Start(PingPong(void, Start(PingPong(void, ps.Exit)))));
-
-const Runner = ps.Runner(EnterFsmState);
-const curr_id = Runner.idFromState(EnterFsmState.State);
