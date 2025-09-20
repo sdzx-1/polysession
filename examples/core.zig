@@ -12,6 +12,9 @@ pub const ServerContext = struct {
     send_buff: [1024 * 1024]u8 = @splat(0),
     reader: *std.Io.Reader,
     file_size: u64,
+
+    send_size: usize = 0,
+    hasher: std.hash.XxHash32 = std.hash.XxHash32.init(0),
 };
 
 pub const ClientContext = struct {
@@ -20,6 +23,9 @@ pub const ClientContext = struct {
     writer: *std.Io.Writer,
     total: u64 = 0,
     recved: u64 = 0,
+
+    recved_hash: ?u32 = null,
+    hasher: std.hash.XxHash32 = std.hash.XxHash32.init(0),
 };
 
 pub const Context: ps.ClientAndServerContext = .{

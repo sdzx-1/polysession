@@ -8,17 +8,47 @@ pub fn SendFile(Data_: type, State_: type) type {
     return ps.Session("SendFile", Data_, State_);
 }
 
+const InitCheckHash = struct {
+    pub fn process(ctx: *ServerContext) !u32 {
+        return ctx.hasher.final();
+    }
+
+    pub fn preprocess(ctx: *ClientContext, msg: u32) !void {
+        ctx.recved_hash = msg;
+    }
+};
+
 pub const Start = union(enum) {
+    check: SendFile(u32, CheckHash(Start)),
     send: SendFile([]const u8, @This()),
-    final: SendFile([]const u8, ps.Exit),
+    final: SendFile(
+        []const u8,
+        ps.Cast(
+            "init check hash",
+            .server,
+            InitCheckHash,
+            SendFile(u32, CheckHash(ps.Exit)),
+        ),
+    ),
 
     pub const agency: ps.Role = .server;
 
     pub fn process(ctx: *ServerContext) !@This() {
+        if (ctx.send_size >= 20 * 1024 * 1024) {
+            ctx.send_size = 0;
+            const curr_hash = ctx.hasher.final();
+            ctx.hasher = std.hash.XxHash32.init(0);
+            return .{ .check = .{ .data = curr_hash } };
+        }
+
         const n = try ctx.reader.readSliceShort(&ctx.send_buff);
         if (n < ctx.send_buff.len) {
+            ctx.hasher.update(ctx.send_buff[0..n]);
+            ctx.send_size += ctx.send_buff.len;
             return .{ .final = .{ .data = ctx.send_buff[0..n] } };
         } else {
+            ctx.hasher.update(&ctx.send_buff);
+            ctx.send_size += ctx.send_buff.len;
             return .{ .send = .{ .data = &ctx.send_buff } };
         }
     }
@@ -29,13 +59,18 @@ pub const Start = union(enum) {
             .send => |val| {
                 size = val.data.len;
                 ctx.recved += val.data.len;
+                ctx.hasher.update(val.data);
                 try ctx.writer.writeAll(val.data);
             },
             .final => |val| {
                 size = val.data.len;
                 ctx.recved += val.data.len;
+                ctx.hasher.update(val.data);
                 try ctx.writer.writeAll(val.data);
                 try ctx.writer.flush();
+            },
+            .check => |val| {
+                ctx.recved_hash = val.data;
             },
         }
 
@@ -45,3 +80,31 @@ pub const Start = union(enum) {
         });
     }
 };
+
+pub fn CheckHash(NextState: type) type {
+    return union(enum) {
+        Successed: SendFile(void, NextState),
+        Failed: SendFile(void, ps.Exit),
+
+        pub const agency: ps.Role = .client;
+
+        pub fn process(ctx: *ClientContext) !@This() {
+            const curr_hash = ctx.hasher.final();
+            ctx.hasher = std.hash.XxHash32.init(0);
+            if (curr_hash == ctx.recved_hash) {
+                std.debug.print("check successed \n", .{});
+                return .{ .Successed = .{ .data = {} } };
+            } else {
+                std.debug.print("check failed \n", .{});
+                return .{ .Failed = .{ .data = {} } };
+            }
+        }
+        pub fn preprocess(ctx: *ServerContext, msg: @This()) !void {
+            _ = ctx;
+            switch (msg) {
+                .Failed => {},
+                .Successed => {},
+            }
+        }
+    };
+}
