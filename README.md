@@ -15,22 +15,16 @@ The client checks the value of the client_counter field in the ClientContext.
 
 ```zig
 
-pub fn PingPong(Data_: type, State_: type) type {
-    return ps.Session("PingPong", Data_, State_);
+const std = @import("std");
+const ps = @import("polysession");
+const core = @import("core.zig");
+const Data = ps.Data;
+const ServerContext = core.ServerContext;
+const ClientContext = core.ClientContext;
+
+pub fn PingPong(State_: type) type {
+    return ps.Session("PingPong", State_);
 }
-
-pub const ServerContext = struct {
-    server_counter: i32,
-};
-
-pub const ClientContext = struct {
-    client_counter: i32,
-};
-
-pub const Context: ps.ClientAndServerContext = .{
-    .client = ClientContext,
-    .server = ServerContext,
-};
 
 const PongFn = struct {
     pub fn process(ctx: *ServerContext) !i32 {
@@ -45,8 +39,8 @@ const PongFn = struct {
 
 pub fn Start(NextFsmState: type) type {
     return union(enum) {
-        ping: PingPong(i32, ps.Cast("pong", .server, PongFn, PingPong(i32, @This()))),
-        next: NextFsmState,
+        ping: Data(i32, PingPong(ps.Cast("pong", .server, PongFn, i32, PingPong(@This())))),
+        next: Data(void, NextFsmState),
 
         pub const agency: ps.Role = .client;
 
@@ -69,7 +63,10 @@ pub fn Start(NextFsmState: type) type {
     };
 }
 
-const EnterFsmState = PingPong(void, Start(PingPong(void, ps.Exit)));
+```
+
+```zig
+pub const EnterFsmState = PingPong(Start(PingPong(ps.Exit)));
 ```
 
 Here we let next point to the Exit state, which means that the pingpong protocol will exit directly after running.
@@ -103,7 +100,7 @@ send: .{ .next = .{ .data = void } }                             recv: .{ .next 
 ---------------------------------------------
 
 ```zig
-const EnterFsmState = PingPong(void, Start(PingPong(void, Start(PingPong(void, ps.Exit)))));
+pub const EnterFsmState = PingPong(Start(PingPong(Start(PingPong(ps.Exit)))));
 ```
 
 Let's modify the protocol so that next now points to the Start state of pingpong (inside Start's next points to Exit). This means we will run the pingpong protocol twice.
