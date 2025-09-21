@@ -20,7 +20,7 @@ pub fn main() !void {
         const read_file = try tmp_dir.createFile("test_read", .{});
         defer read_file.close();
         const str: [1024 * 1024]u8 = @splat(65);
-        for (0..1024) |_| {
+        for (0..100) |_| {
             try read_file.writeAll(&str);
         }
     }

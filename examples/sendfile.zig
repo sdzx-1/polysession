@@ -24,7 +24,13 @@ pub const Start = union(enum) {
     send: Data([]const u8, SendFile(@This())),
     final: Data(
         []const u8,
-        SendFile(ps.Cast("init check hash", .server, InitCheckHash, u64, SendFile(CheckHash(ps.Exit)))),
+        SendFile(ps.Cast(
+            "init check hash",
+            .server,
+            InitCheckHash,
+            u64,
+            SendFile(CheckHash(ps.Exit)),
+        )),
     ),
 
     pub const agency: ps.Role = .server;

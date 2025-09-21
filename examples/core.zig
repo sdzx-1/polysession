@@ -43,7 +43,14 @@ const InitSendFile = struct {
     }
 };
 
-pub const EnterFsmState = PingPong(Start(PingPong(ps.Cast("init send file", .server, InitSendFile, u64, SendFile(sendfile.Start)))));
+pub const EnterFsmState = PingPong(Start(SendFile(ps.Cast(
+    "init send file",
+    .server,
+    InitSendFile,
+    u64,
+    SendFile(sendfile.Start),
+))));
+
 // pub const EnterFsmState = PingPong(Start(PingPong(ps.Exit)));
 
 pub const Runner = ps.Runner(EnterFsmState);
