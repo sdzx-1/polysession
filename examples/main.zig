@@ -52,7 +52,9 @@ pub fn main() !void {
 
             var client_context: ClientContext = .{
                 .client_counter = 0,
-                .writer = &file_writer.interface,
+                .send_file_client = .{
+                    .writer = &file_writer.interface,
+                },
             };
 
             try Runner.runProtocol(
@@ -91,8 +93,10 @@ pub fn main() !void {
 
     var server_context: ServerContext = .{
         .server_counter = 0,
-        .reader = &file_reader.interface,
-        .file_size = (try read_file.stat()).size,
+        .send_file_server = .{
+            .reader = &file_reader.interface,
+            .file_size = (try read_file.stat()).size,
+        },
     };
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{

@@ -8,24 +8,12 @@ const SendFile = sendfile.SendFile;
 
 pub const ServerContext = struct {
     server_counter: i32,
-
-    send_buff: [1024 * 1024]u8 = @splat(0),
-    reader: *std.Io.Reader,
-    file_size: u64,
-
-    send_size: usize = 0,
-    hasher: std.hash.XxHash3 = std.hash.XxHash3.init(0),
+    send_file_server: sendfile.ServerContext,
 };
 
 pub const ClientContext = struct {
     client_counter: i32,
-
-    writer: *std.Io.Writer,
-    total: u64 = 0,
-    recved: u64 = 0,
-
-    recved_hash: ?u64 = null,
-    hasher: std.hash.XxHash3 = std.hash.XxHash3.init(0),
+    send_file_client: sendfile.ClientContext,
 };
 
 pub const Context: ps.ClientAndServerContext = .{
@@ -35,11 +23,11 @@ pub const Context: ps.ClientAndServerContext = .{
 
 const InitSendFile = struct {
     pub fn process(ctx: *ServerContext) !u64 {
-        return ctx.file_size;
+        return ctx.send_file_server.file_size;
     }
 
     pub fn preprocess(ctx: *ClientContext, val: u64) !void {
-        ctx.total = val;
+        ctx.send_file_client.total = val;
     }
 };
 
@@ -48,7 +36,7 @@ pub const EnterFsmState = PingPong(Start(SendFile(ps.Cast(
     .server,
     InitSendFile,
     u64,
-    SendFile(sendfile.Start),
+    SendFile(sendfile.MkSendFile(Context).Start),
 ))));
 
 // pub const EnterFsmState = PingPong(Start(PingPong(ps.Exit)));
