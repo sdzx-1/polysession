@@ -9,17 +9,17 @@ pub fn SendFile(Data_: type, State_: type) type {
 }
 
 const InitCheckHash = struct {
-    pub fn process(ctx: *ServerContext) !u32 {
+    pub fn process(ctx: *ServerContext) !u64 {
         return ctx.hasher.final();
     }
 
-    pub fn preprocess(ctx: *ClientContext, msg: u32) !void {
+    pub fn preprocess(ctx: *ClientContext, msg: u64) !void {
         ctx.recved_hash = msg;
     }
 };
 
 pub const Start = union(enum) {
-    check: SendFile(u32, CheckHash(Start)),
+    check: SendFile(u64, CheckHash(@This())),
     send: SendFile([]const u8, @This()),
     final: SendFile(
         []const u8,
@@ -27,7 +27,7 @@ pub const Start = union(enum) {
             "init check hash",
             .server,
             InitCheckHash,
-            SendFile(u32, CheckHash(ps.Exit)),
+            SendFile(u64, CheckHash(ps.Exit)),
         ),
     ),
 
@@ -37,7 +37,7 @@ pub const Start = union(enum) {
         if (ctx.send_size >= 20 * 1024 * 1024) {
             ctx.send_size = 0;
             const curr_hash = ctx.hasher.final();
-            ctx.hasher = std.hash.XxHash32.init(0);
+            ctx.hasher = std.hash.XxHash3.init(0);
             return .{ .check = .{ .data = curr_hash } };
         }
 
@@ -90,7 +90,7 @@ pub fn CheckHash(NextState: type) type {
 
         pub fn process(ctx: *ClientContext) !@This() {
             const curr_hash = ctx.hasher.final();
-            ctx.hasher = std.hash.XxHash32.init(0);
+            ctx.hasher = std.hash.XxHash3.init(0);
             if (curr_hash == ctx.recved_hash) {
                 std.debug.print("check successed \n", .{});
                 return .{ .Successed = .{ .data = {} } };

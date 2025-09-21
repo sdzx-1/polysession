@@ -14,7 +14,7 @@ pub const ServerContext = struct {
     file_size: u64,
 
     send_size: usize = 0,
-    hasher: std.hash.XxHash32 = std.hash.XxHash32.init(0),
+    hasher: std.hash.XxHash3 = std.hash.XxHash3.init(0),
 };
 
 pub const ClientContext = struct {
@@ -24,8 +24,8 @@ pub const ClientContext = struct {
     total: u64 = 0,
     recved: u64 = 0,
 
-    recved_hash: ?u32 = null,
-    hasher: std.hash.XxHash32 = std.hash.XxHash32.init(0),
+    recved_hash: ?u64 = null,
+    hasher: std.hash.XxHash3 = std.hash.XxHash3.init(0),
 };
 
 pub const Context: ps.ClientAndServerContext = .{
