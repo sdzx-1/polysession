@@ -29,16 +29,13 @@ pub fn MkSendFile(Context: ps.ClientAndServerContext) type {
         pub const Start = union(enum) {
             check: Data(u64, SendFile(CheckHash(@This()))),
             send: Data([]const u8, SendFile(@This())),
-            final: Data(
-                []const u8,
-                SendFile(ps.Cast(
-                    "init check hash",
-                    .server,
-                    InitCheckHash,
-                    u64,
-                    SendFile(CheckHash(ps.Exit)),
-                )),
-            ),
+            final: Data([]const u8, SendFile(ps.Cast(
+                "init check hash",
+                .server,
+                InitCheckHash,
+                u64,
+                SendFile(CheckHash(ps.Exit)),
+            ))),
 
             pub const agency: ps.Role = .server;
 

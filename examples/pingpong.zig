@@ -22,7 +22,13 @@ const PongFn = struct {
 
 pub fn Start(NextFsmState: type) type {
     return union(enum) {
-        ping: Data(i32, PingPong(ps.Cast("pong", .server, PongFn, i32, PingPong(@This())))),
+        ping: Data(i32, PingPong(ps.Cast(
+            "pong",
+            .server,
+            PongFn,
+            i32,
+            PingPong(@This()),
+        ))),
         next: Data(void, NextFsmState),
 
         pub const agency: ps.Role = .client;
