@@ -1,11 +1,12 @@
 const std = @import("std");
 const ps = @import("polysession");
 const core = @import("core.zig");
+const Data = ps.Data;
 const ServerContext = core.ServerContext;
 const ClientContext = core.ClientContext;
 
-pub fn PingPong(Data_: type, State_: type) type {
-    return ps.Session("PingPong", Data_, State_);
+pub fn PingPong(State_: type) type {
+    return ps.Session("PingPong", State_);
 }
 
 const PongFn = struct {
@@ -21,8 +22,8 @@ const PongFn = struct {
 
 pub fn Start(NextFsmState: type) type {
     return union(enum) {
-        ping: PingPong(i32, ps.Cast("pong", .server, PongFn, PingPong(i32, @This()))),
-        next: NextFsmState,
+        ping: Data(i32, PingPong(ps.Cast("pong", .server, PongFn, i32, PingPong(@This())))),
+        next: Data(void, NextFsmState),
 
         pub const agency: ps.Role = .client;
 

@@ -5,15 +5,10 @@ pub const Exit = union(enum) {};
 
 pub fn Session(
     comptime name_: []const u8,
-    comptime Data_: type,
     comptime State_: type,
 ) type {
     return struct {
-        data: Data_,
-
         pub const name = name_;
-
-        pub const Data = Data_;
         pub const State = State_;
     };
 }
@@ -30,14 +25,24 @@ pub const Role = enum {
     }
 };
 
+pub fn Data(Data_: type, FsmState_: type) type {
+    return struct {
+        data: Data_,
+
+        pub const Data = Data_;
+        pub const FsmState = FsmState_;
+    };
+}
+
 pub fn Cast(
     comptime Label_: []const u8,
     comptime agency_: Role,
     comptime CastFn: type,
+    comptime T: type,
     comptime NextFsmState: type,
 ) type {
     return union(enum) {
-        cast: NextFsmState,
+        cast: Data(T, NextFsmState),
 
         pub const Label = Label_;
 
@@ -137,7 +142,7 @@ fn reachableStatesDepthFirstSearch(
         switch (@typeInfo(CurrentState)) {
             .@"union" => |un| {
                 for (un.fields) |field| {
-                    const NextFsmState = field.type;
+                    const NextFsmState = field.type.FsmState;
 
                     const NextState = NextFsmState.State;
 
@@ -274,8 +279,8 @@ pub fn Runner(
 
                     switch (result) {
                         inline else => |new_fsm_state_wit| {
-                            const NewFsmState = @TypeOf(new_fsm_state_wit);
-                            continue :sw comptime idFromState(NewFsmState.State);
+                            const NewData = @TypeOf(new_fsm_state_wit);
+                            continue :sw comptime idFromState(NewData.FsmState.State);
                         },
                     }
                 },

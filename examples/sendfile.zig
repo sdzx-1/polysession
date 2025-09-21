@@ -1,11 +1,12 @@
 const std = @import("std");
 const ps = @import("polysession");
 const core = @import("core.zig");
+const Data = ps.Data;
 const ServerContext = core.ServerContext;
 const ClientContext = core.ClientContext;
 
-pub fn SendFile(Data_: type, State_: type) type {
-    return ps.Session("SendFile", Data_, State_);
+pub fn SendFile(State_: type) type {
+    return ps.Session("SendFile", State_);
 }
 
 const InitCheckHash = struct {
@@ -19,16 +20,11 @@ const InitCheckHash = struct {
 };
 
 pub const Start = union(enum) {
-    check: SendFile(u64, CheckHash(@This())),
-    send: SendFile([]const u8, @This()),
-    final: SendFile(
+    check: Data(u64, SendFile(CheckHash(@This()))),
+    send: Data([]const u8, SendFile(@This())),
+    final: Data(
         []const u8,
-        ps.Cast(
-            "init check hash",
-            .server,
-            InitCheckHash,
-            SendFile(u64, CheckHash(ps.Exit)),
-        ),
+        SendFile(ps.Cast("init check hash", .server, InitCheckHash, u64, SendFile(CheckHash(ps.Exit)))),
     ),
 
     pub const agency: ps.Role = .server;
@@ -83,8 +79,8 @@ pub const Start = union(enum) {
 
 pub fn CheckHash(NextState: type) type {
     return union(enum) {
-        Successed: SendFile(void, NextState),
-        Failed: SendFile(void, ps.Exit),
+        Successed: Data(void, SendFile(NextState)),
+        Failed: Data(void, SendFile(ps.Exit)),
 
         pub const agency: ps.Role = .client;
 
