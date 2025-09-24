@@ -257,8 +257,10 @@ pub fn Runner(
             comptime role: Role,
             channel: anytype,
             curr_id: StateId,
+            comptime onProtocolSwitch: ?fn ([]const u8, []const u8) void, // Triggered when protocol switch,
             ctx: *@field(Context, @tagName(role)),
         ) !void {
+            var curr_protocol_name: []const u8 = FsmState.name;
             @setEvalBranchQuota(10_000_000);
             sw: switch (curr_id) {
                 inline else => |state_id| {
@@ -279,8 +281,15 @@ pub fn Runner(
 
                     switch (result) {
                         inline else => |new_fsm_state_wit| {
-                            const NewData = @TypeOf(new_fsm_state_wit);
-                            continue :sw comptime idFromState(NewData.FsmState.State);
+                            const NewFsmState = @TypeOf(new_fsm_state_wit).FsmState;
+                            const new_protocol_name = comptime NewFsmState.name;
+                            if (comptime onProtocolSwitch) |fun| {
+                                if (!std.mem.eql(u8, curr_protocol_name, new_protocol_name)) {
+                                    fun(curr_protocol_name, new_protocol_name);
+                                    curr_protocol_name = new_protocol_name;
+                                }
+                            }
+                            continue :sw comptime idFromState(NewFsmState.State);
                         },
                     }
                 },

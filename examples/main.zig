@@ -65,6 +65,7 @@ pub fn main() !void {
                     .log = false,
                 },
                 curr_id,
+                onProtocolSwitch,
                 &client_context,
             );
         }
@@ -107,8 +108,13 @@ pub fn main() !void {
             .log = false,
         },
         curr_id,
+        null,
         &server_context,
     });
 
     defer stid.join();
+}
+
+fn onProtocolSwitch(old: []const u8, new: []const u8) void {
+    std.debug.print("switch protocol form {s}, to {s}\n", .{ old, new });
 }
