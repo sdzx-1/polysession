@@ -8,12 +8,12 @@ const SendFile = sendfile.SendFile;
 
 pub const ServerContext = struct {
     server_counter: i32,
-    send_file_server: sendfile.ServerContext,
+    send_context: sendfile.SendContext,
 };
 
 pub const ClientContext = struct {
     client_counter: i32,
-    send_file_client: sendfile.ClientContext,
+    recv_context: sendfile.RecvContext,
 };
 
 pub const Context: ps.ClientAndServerContext = .{
@@ -23,11 +23,11 @@ pub const Context: ps.ClientAndServerContext = .{
 
 const InitSendFile = struct {
     pub fn process(ctx: *ServerContext) !u64 {
-        return ctx.send_file_server.file_size;
+        return ctx.send_context.file_size;
     }
 
     pub fn preprocess(ctx: *ClientContext, val: u64) !void {
-        ctx.send_file_client.total = val;
+        ctx.recv_context.total = val;
     }
 };
 
@@ -36,10 +36,14 @@ pub const EnterFsmState = PingPong(Start(SendFile(ps.Cast(
     .server,
     InitSendFile,
     u64,
-    SendFile(sendfile.MkSendFile(Context).Start),
+    SendFile(sendfile.MkSendFile(
+        .server,
+        Context,
+        20 * 1024 * 1024,
+        .send_context,
+        .recv_context,
+    ).Start(PingPong(Start(PingPong(ps.Exit))), SendFile(ps.Exit))),
 ))));
-
-// pub const EnterFsmState = PingPong(Start(PingPong(ps.Exit)));
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState.State);

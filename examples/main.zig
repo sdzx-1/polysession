@@ -52,7 +52,7 @@ pub fn main() !void {
 
             var client_context: ClientContext = .{
                 .client_counter = 0,
-                .send_file_client = .{
+                .recv_context = .{
                     .writer = &file_writer.interface,
                 },
             };
@@ -93,7 +93,7 @@ pub fn main() !void {
 
     var server_context: ServerContext = .{
         .server_counter = 0,
-        .send_file_server = .{
+        .send_context = .{
             .reader = &file_reader.interface,
             .file_size = (try read_file.stat()).size,
         },
