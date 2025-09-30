@@ -120,7 +120,7 @@ pub fn MkSendFile(
                 Successed: Data(void, Successed_NextFsmState),
                 Failed: Data(void, Failed_NextFsmState),
 
-                pub const agency: ps.Role = .client;
+                pub const agency: ps.Role = sender.flip();
 
                 pub fn process(all_ctx: *@field(Context, @tagName(sender.flip()))) !@This() {
                     const ctx = recver_ctxFromParent(all_ctx);
