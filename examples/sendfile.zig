@@ -2,10 +2,6 @@ const std = @import("std");
 const ps = @import("polysession");
 const Data = ps.Data;
 
-pub fn SendFile(State_: type) type {
-    return ps.Session("SendFile", State_);
-}
-
 pub const SendContext = struct {
     send_buff: [1024 * 1024]u8 = @splat(0),
     reader: *std.Io.Reader,
@@ -36,21 +32,50 @@ pub fn MkSendFile(
             Successed_NextFsmState: type,
             Failed_NextFsmState: type,
         ) type {
+            const InitSendFile = struct {
+                pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !u64 {
+                    const ctx = sender_ctxFromParent(parent_ctx);
+                    return ctx.file_size;
+                }
+
+                pub fn preprocess(parent_ctx: *@field(Context, @tagName(sender.flip())), msg: u64) !void {
+                    const ctx = recver_ctxFromParent(parent_ctx);
+                    ctx.total = msg;
+                }
+            };
+
+            return ps.Cast(
+                "sendfile",
+                "init send file",
+                sender,
+                InitSendFile,
+                u64,
+                Send(Successed_NextFsmState, Failed_NextFsmState),
+            );
+        }
+
+        pub fn Send(
+            Successed_NextFsmState: type,
+            Failed_NextFsmState: type,
+        ) type {
             return union(enum) {
-                check: Data(u64, SendFile(CheckHash(SendFile(@This()), Failed_NextFsmState))),
-                send: Data([]const u8, SendFile(@This())),
-                final: Data([]const u8, SendFile(ps.Cast(
+                check: Data(u64, CheckHash(@This(), Failed_NextFsmState)),
+                send: Data([]const u8, @This()),
+                final: Data([]const u8, ps.Cast(
+                    "sendfile",
                     "init check hash",
-                    .server,
+                    sender,
                     InitCheckHash,
                     u64,
-                    SendFile(CheckHash(Successed_NextFsmState, Failed_NextFsmState)),
-                ))),
+                    CheckHash(Successed_NextFsmState, Failed_NextFsmState),
+                )),
+                final_zero: Data(void, Successed_NextFsmState),
 
                 pub const agency: ps.Role = sender;
+                pub const protocol = "sendfile";
 
-                pub fn process(all_ctx: *@field(Context, @tagName(sender))) !@This() {
-                    const ctx = sender_ctxFromParent(all_ctx);
+                pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !@This() {
+                    const ctx = sender_ctxFromParent(parent_ctx);
                     if (ctx.send_size >= batch_size) {
                         ctx.send_size = 0;
                         const curr_hash = ctx.hasher.final();
@@ -59,6 +84,9 @@ pub fn MkSendFile(
                     }
 
                     const n = try ctx.reader.readSliceShort(&ctx.send_buff);
+
+                    if (n == 0) return .{ .final_zero = .{ .data = {} } };
+
                     if (n < ctx.send_buff.len) {
                         ctx.hasher.update(ctx.send_buff[0..n]);
                         ctx.send_size += ctx.send_buff.len;
@@ -70,8 +98,8 @@ pub fn MkSendFile(
                     }
                 }
 
-                pub fn preprocess(all_ctx: *@field(Context, @tagName(sender.flip())), msg: @This()) !void {
-                    const ctx = recver_ctxFromParent(all_ctx);
+                pub fn preprocess(parent_ctx: *@field(Context, @tagName(sender.flip())), msg: @This()) !void {
+                    const ctx = recver_ctxFromParent(parent_ctx);
                     var size: usize = 0;
                     switch (msg) {
                         .send => |val| {
@@ -87,6 +115,7 @@ pub fn MkSendFile(
                             try ctx.writer.writeAll(val.data);
                             try ctx.writer.flush();
                         },
+                        .final_zero => {},
                         .check => |val| {
                             ctx.recved_hash = val.data;
                         },
@@ -99,13 +128,13 @@ pub fn MkSendFile(
                 }
 
                 const InitCheckHash = struct {
-                    pub fn process(all_ctx: *@field(Context, @tagName(sender))) !u64 {
-                        const ctx = sender_ctxFromParent(all_ctx);
+                    pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !u64 {
+                        const ctx = sender_ctxFromParent(parent_ctx);
                         return ctx.hasher.final();
                     }
 
-                    pub fn preprocess(all_ctx: *@field(Context, @tagName(sender.flip())), msg: u64) !void {
-                        const ctx = recver_ctxFromParent(all_ctx);
+                    pub fn preprocess(parent_ctx: *@field(Context, @tagName(sender.flip())), msg: u64) !void {
+                        const ctx = recver_ctxFromParent(parent_ctx);
                         ctx.recved_hash = msg;
                     }
                 };
@@ -121,9 +150,10 @@ pub fn MkSendFile(
                 Failed: Data(void, Failed_NextFsmState),
 
                 pub const agency: ps.Role = sender.flip();
+                pub const protocol = "sendfile";
 
-                pub fn process(all_ctx: *@field(Context, @tagName(sender.flip()))) !@This() {
-                    const ctx = recver_ctxFromParent(all_ctx);
+                pub fn process(parent_ctx: *@field(Context, @tagName(sender.flip()))) !@This() {
+                    const ctx = recver_ctxFromParent(parent_ctx);
                     const curr_hash = ctx.hasher.final();
                     ctx.hasher = std.hash.XxHash3.init(0);
                     if (curr_hash == ctx.recved_hash) {
@@ -134,8 +164,8 @@ pub fn MkSendFile(
                         return .{ .Failed = .{ .data = {} } };
                     }
                 }
-                pub fn preprocess(all_ctx: *@field(Context, @tagName(sender)), msg: @This()) !void {
-                    const ctx = sender_ctxFromParent(all_ctx);
+                pub fn preprocess(parent_ctx: *@field(Context, @tagName(sender)), msg: @This()) !void {
+                    const ctx = sender_ctxFromParent(parent_ctx);
                     _ = ctx;
                     switch (msg) {
                         .Failed => {},

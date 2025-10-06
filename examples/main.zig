@@ -10,7 +10,6 @@ const Runner = core.Runner;
 const curr_id = core.curr_id;
 
 pub fn main() !void {
-
     //create tmp dir
     var tmp_dir_instance = std.testing.tmpDir(.{});
     defer tmp_dir_instance.cleanup();
@@ -51,7 +50,7 @@ pub fn main() !void {
             var file_writer = write_file.writer(&file_writer_buf);
 
             var client_context: ClientContext = .{
-                .client_counter = 0,
+                .pingpong = .{ .client_counter = 0 },
                 .recv_context = .{
                     .writer = &file_writer.interface,
                 },
@@ -92,7 +91,7 @@ pub fn main() !void {
     var file_reader = read_file.reader(&file_reader_buf);
 
     var server_context: ServerContext = .{
-        .server_counter = 0,
+        .pingpong = .{ .server_counter = 0 },
         .send_context = .{
             .reader = &file_reader.interface,
             .file_size = (try read_file.stat()).size,

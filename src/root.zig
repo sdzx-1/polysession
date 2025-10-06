@@ -1,17 +1,9 @@
 const std = @import("std");
 const meta = std.meta;
 
-pub const Exit = union(enum) {};
-
-pub fn Session(
-    comptime name_: []const u8,
-    comptime State_: type,
-) type {
-    return struct {
-        pub const name = name_;
-        pub const State = State_;
-    };
-}
+pub const Exit = union(enum) {
+    pub const protocol = "polysession_exit";
+};
 
 pub const Role = enum {
     client,
@@ -35,6 +27,7 @@ pub fn Data(Data_: type, FsmState_: type) type {
 }
 
 pub fn Cast(
+    comptime protocol_: []const u8,
     comptime Label_: []const u8,
     comptime agency_: Role,
     comptime CastFn: type,
@@ -47,6 +40,7 @@ pub fn Cast(
         pub const Label = Label_;
 
         pub const agency: Role = agency_;
+        pub const protocol = protocol_;
 
         const ConfigContext = ContextFromState(CastFn, agency);
 
@@ -105,13 +99,13 @@ fn TypeSet(comptime bucket_count: usize) type {
 
 pub fn reachableStates(comptime FsmState: type) struct { states: []const type, state_machine_names: []const []const u8 } {
     comptime {
-        var states: []const type = &.{FsmState.State};
-        var state_machine_names: []const []const u8 = &.{FsmState.name};
+        var states: []const type = &.{FsmState};
+        var state_machine_names: []const []const u8 = &.{FsmState.protocol};
         var states_stack: []const type = &.{FsmState};
         var states_set: TypeSet(128) = .init;
-        const ExpectedContext = ContextFromState(FsmState.State, FsmState.State.agency);
+        const ExpectedContext = ContextFromState(FsmState, FsmState.agency);
 
-        states_set.insert(FsmState.State);
+        states_set.insert(FsmState);
 
         reachableStatesDepthFirstSearch(FsmState, &states, &state_machine_names, &states_stack, &states_set, ExpectedContext);
 
@@ -137,28 +131,29 @@ fn reachableStatesDepthFirstSearch(
         const CurrentFsmState = states_stack.*[states_stack.len - 1];
         states_stack.* = states_stack.*[0 .. states_stack.len - 1];
 
-        const CurrentState = CurrentFsmState.State;
+        const CurrentState = CurrentFsmState;
 
         switch (@typeInfo(CurrentState)) {
             .@"union" => |un| {
                 for (un.fields) |field| {
                     const NextFsmState = field.type.FsmState;
 
-                    const NextState = NextFsmState.State;
-
-                    if (!states_set.has(NextState)) {
+                    if (!states_set.has(NextFsmState)) {
                         // Validate that the handler context type matches (skip for special states like Exit)
-                        if (NextState != Exit) {
-                            const NextContext = ContextFromState(NextState, NextState.agency);
+                        if (NextFsmState != Exit) {
+                            const NextContext = ContextFromState(NextFsmState, NextFsmState.agency);
                             if (NextContext.client != ExpectedContext.client or NextContext.server != ExpectedContext.server) {
-                                @compileError(std.fmt.comptimePrint("Context type mismatch: State {s} has context type {s}, but expected {s}", .{ @typeName(NextState), @typeName(NextContext), @typeName(ExpectedContext) }));
+                                @compileError(std.fmt.comptimePrint(
+                                    "Context type mismatch: FsmState {s} has context type {s}, but expected {s}",
+                                    .{ @typeName(NextFsmState), @typeName(NextContext), @typeName(ExpectedContext) },
+                                ));
                             }
                         }
 
-                        states.* = states.* ++ &[_]type{NextState};
-                        state_machine_names.* = state_machine_names.* ++ &[_][]const u8{NextFsmState.name};
+                        states.* = states.* ++ &[_]type{NextFsmState};
+                        state_machine_names.* = state_machine_names.* ++ &[_][]const u8{NextFsmState.protocol};
                         states_stack.* = states_stack.* ++ &[_]type{NextFsmState};
-                        states_set.insert(NextState);
+                        states_set.insert(NextFsmState);
 
                         reachableStatesDepthFirstSearch(FsmState, states, state_machine_names, states_stack, states_set, ExpectedContext);
                     }
@@ -241,7 +236,7 @@ pub fn Runner(
     comptime FsmState: type,
 ) type {
     return struct {
-        pub const Context = ContextFromState(FsmState.State, FsmState.State.agency);
+        pub const Context = ContextFromState(FsmState, FsmState.agency);
         pub const state_map: StateMap = .init(FsmState);
         pub const StateId = state_map.StateId;
 
@@ -280,7 +275,7 @@ pub fn Runner(
                     switch (result) {
                         inline else => |new_fsm_state_wit| {
                             const NewData = @TypeOf(new_fsm_state_wit);
-                            continue :sw comptime idFromState(NewData.FsmState.State);
+                            continue :sw comptime idFromState(NewData.FsmState);
                         },
                     }
                 },
