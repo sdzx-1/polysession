@@ -19,46 +19,69 @@ const std = @import("std");
 const ps = @import("polysession");
 const core = @import("core.zig");
 const Data = ps.Data;
-const ServerContext = core.ServerContext;
-const ClientContext = core.ClientContext;
 
-pub fn PingPong(State_: type) type {
-    return ps.Session("PingPong", State_);
-}
-
-const PongFn = struct {
-    pub fn process(ctx: *ServerContext) !i32 {
-        ctx.server_counter += 1;
-        return ctx.server_counter;
-    }
-
-    pub fn preprocess(ctx: *ClientContext, val: i32) !void {
-        ctx.client_counter = val;
-    }
+pub const ServerContext = struct {
+    server_counter: i32,
 };
 
-pub fn Start(NextFsmState: type) type {
-    return union(enum) {
-        ping: Data(i32, PingPong(ps.Cast("pong", .server, PongFn, i32, PingPong(@This())))),
-        next: Data(void, NextFsmState),
+pub const ClientContext = struct {
+    client_counter: i32,
+};
 
-        pub const agency: ps.Role = .client;
+pub fn MkPingPong(
+    comptime client: ps.Role,
+    comptime Context: ps.ClientAndServerContext,
+    comptime client_ctx_field: std.meta.FieldEnum(@field(Context, @tagName(client))),
+    comptime server_ctx_field: std.meta.FieldEnum(@field(Context, @tagName(client.flip()))),
+) type {
+    return struct {
+        pub fn Start(NextFsmState: type) type {
+            return union(enum) {
+                ping: Data(i32, ps.Cast("pingpong", "pong", client.flip(), PongFn, i32, @This())),
+                next: Data(void, NextFsmState),
 
-        pub fn process(ctx: *ClientContext) !@This() {
-            if (ctx.client_counter >= 10) {
-                ctx.client_counter = 0;
-                return .{ .next = .{ .data = {} } };
-            }
-            return .{ .ping = .{ .data = ctx.client_counter } };
+                pub const agency: ps.Role = client;
+                pub const protocol = "pingpong";
+
+                pub fn process(parent_ctx: *@field(Context, @tagName(client))) !@This() {
+                    const ctx = client_ctxFromParent(parent_ctx);
+                    if (ctx.client_counter >= 10) {
+                        ctx.client_counter = 0;
+                        return .{ .next = .{ .data = {} } };
+                    }
+                    return .{ .ping = .{ .data = ctx.client_counter } };
+                }
+
+                pub fn preprocess(parent_ctx: *@field(Context, @tagName(client.flip())), msg: @This()) !void {
+                    const ctx = server_ctxFromParent(parent_ctx);
+                    switch (msg) {
+                        .ping => |val| ctx.server_counter = val.data,
+                        .next => {
+                            ctx.server_counter = 0;
+                        },
+                    }
+                }
+            };
         }
 
-        pub fn preprocess(ctx: *ServerContext, msg: @This()) !void {
-            switch (msg) {
-                .ping => |val| ctx.server_counter = val.data,
-                .next => {
-                    ctx.server_counter = 0;
-                },
+        const PongFn = struct {
+            pub fn process(parent_ctx: *@field(Context, @tagName(client.flip()))) !i32 {
+                const ctx = server_ctxFromParent(parent_ctx);
+                ctx.server_counter += 1;
+                return ctx.server_counter;
             }
+
+            pub fn preprocess(parent_ctx: *@field(Context, @tagName(client)), val: i32) !void {
+                const ctx = client_ctxFromParent(parent_ctx);
+                ctx.client_counter = val;
+            }
+        };
+        fn client_ctxFromParent(parent_ctx: *@field(Context, @tagName(client))) *ClientContext {
+            return &@field(parent_ctx, @tagName(client_ctx_field));
+        }
+
+        fn server_ctxFromParent(parent_ctx: *@field(Context, @tagName(client.flip()))) *ServerContext {
+            return &@field(parent_ctx, @tagName(server_ctx_field));
         }
     };
 }
@@ -66,7 +89,8 @@ pub fn Start(NextFsmState: type) type {
 ```
 
 ```zig
-pub const EnterFsmState = PingPong(Start(PingPong(ps.Exit)));
+const PingPong = pingpong.MkPingPong(.client, Context, .pingpong, .pingpong);
+pub const EnterFsmState = PingPong.Start(ps.Exit);
 ```
 
 Here we let next point to the Exit state, which means that the pingpong protocol will exit directly after running.
@@ -100,7 +124,7 @@ send: .{ .next = .{ .data = void } }                             recv: .{ .next 
 ---------------------------------------------
 
 ```zig
-pub const EnterFsmState = PingPong(Start(PingPong(Start(PingPong(ps.Exit)))));
+pub const EnterFsmState = PingPong.Start(PingPong.Start(ps.Exit));
 ```
 
 Let's modify the protocol so that next now points to the Start state of pingpong (inside Start's next points to Exit). This means we will run the pingpong protocol twice.
