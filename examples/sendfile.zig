@@ -107,6 +107,11 @@ pub fn MkSendFile(
                             ctx.recved += val.data.len;
                             ctx.hasher.update(val.data);
                             try ctx.writer.writeAll(val.data);
+
+                            std.debug.print("recv: send {Bi}, {d:.4}\n", .{
+                                size,
+                                @as(f32, @floatFromInt(ctx.recved)) / @as(f32, @floatFromInt(ctx.total)),
+                            });
                         },
                         .final => |val| {
                             size = val.data.len;
@@ -114,17 +119,20 @@ pub fn MkSendFile(
                             ctx.hasher.update(val.data);
                             try ctx.writer.writeAll(val.data);
                             try ctx.writer.flush();
+
+                            std.debug.print("recv: final {Bi}, {d:.4}\n", .{
+                                size,
+                                @as(f32, @floatFromInt(ctx.recved)) / @as(f32, @floatFromInt(ctx.total)),
+                            });
                         },
-                        .final_zero => {},
+                        .final_zero => {
+                            std.debug.print("recv: final_zero\n", .{});
+                        },
                         .check => |val| {
                             ctx.recved_hash = val.data;
+                            std.debug.print("recv: check, hash: {d}\n", .{val.data});
                         },
                     }
-
-                    std.debug.print("recv: {Bi}, {d:.4}\n", .{
-                        size,
-                        @as(f32, @floatFromInt(ctx.recved)) / @as(f32, @floatFromInt(ctx.total)),
-                    });
                 }
 
                 const InitCheckHash = struct {
