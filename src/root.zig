@@ -1,5 +1,6 @@
 const std = @import("std");
 const meta = std.meta;
+pub const Graph = @import("Graph.zig");
 
 pub const Exit = union(enum) {
     pub const protocol = "polysession_exit";

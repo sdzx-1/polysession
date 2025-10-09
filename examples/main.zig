@@ -10,6 +10,13 @@ const Runner = core.Runner;
 const curr_id = core.curr_id;
 
 pub fn main() !void {
+    var gpa_instance = std.heap.DebugAllocator(.{}).init;
+    const gpa = gpa_instance.allocator();
+
+    const graph: ps.Graph = try core.graph(gpa);
+    var stdio_writer = std.fs.File.stdout().writer(&.{});
+    try graph.generateDot(&stdio_writer.interface);
+
     //create tmp dir
     var tmp_dir_instance = std.testing.tmpDir(.{});
     defer tmp_dir_instance.cleanup();

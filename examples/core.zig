@@ -25,3 +25,7 @@ pub const EnterFsmState = PingPong.Start(SendFile.Start(PingPong.Start(ps.Exit),
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);
+
+pub fn graph(gpa: std.mem.Allocator) !ps.Graph {
+    return ps.Graph.initWithFsm(gpa, EnterFsmState);
+}
