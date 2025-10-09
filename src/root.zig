@@ -30,8 +30,8 @@ pub fn Cast(
     comptime protocol_: []const u8,
     comptime Label_: []const u8,
     comptime agency_: Role,
-    comptime CastFn: type,
     comptime T: type,
+    comptime CastFn: type,
     comptime NextFsmState: type,
 ) type {
     return union(enum) {

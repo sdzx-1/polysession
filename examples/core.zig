@@ -21,10 +21,7 @@ pub const Context: ps.ClientAndServerContext = .{
 const PingPong = pingpong.MkPingPong(.client, Context, .pingpong, .pingpong);
 const SendFile = sendfile.MkSendFile(.server, Context, 20 * 1024 * 1024, .send_context, .recv_context);
 
-pub const EnterFsmState = PingPong.Start(SendFile.Start(
-    PingPong.Start(ps.Exit),
-    ps.Exit,
-));
+pub const EnterFsmState = PingPong.Start(SendFile.Start(PingPong.Start(ps.Exit), ps.Exit));
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);

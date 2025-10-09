@@ -20,7 +20,7 @@ pub fn MkPingPong(
     return struct {
         pub fn Start(NextFsmState: type) type {
             return union(enum) {
-                ping: Data(i32, ps.Cast("pingpong", "pong", client.flip(), PongFn, i32, @This())),
+                ping: Data(i32, ps.Cast("pingpong", "pong", client.flip(), i32, PongFn, @This())),
                 next: Data(void, NextFsmState),
 
                 pub const agency: ps.Role = client;

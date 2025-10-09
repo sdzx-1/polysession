@@ -48,8 +48,8 @@ pub fn MkSendFile(
                 "sendfile",
                 "init send file",
                 sender,
-                InitSendFile,
                 u64,
+                InitSendFile,
                 Send(Successed_NextFsmState, Failed_NextFsmState),
             );
         }
@@ -65,8 +65,8 @@ pub fn MkSendFile(
                     "sendfile",
                     "init check hash",
                     sender,
-                    InitCheckHash,
                     u64,
+                    InitCheckHash,
                     CheckHash(Successed_NextFsmState, Failed_NextFsmState),
                 )),
                 final_zero: Data(void, Successed_NextFsmState),
