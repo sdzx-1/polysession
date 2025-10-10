@@ -16,18 +16,19 @@ pub const Node = struct {
     name: []const u8,
     id: u32,
     fsm_name: []const u8,
+    color: Color,
 };
 
 pub const Edge = struct {
     from: u32,
     to: u32,
-    color: Color,
     label: []const u8,
 };
 
 pub const Color = enum {
-    black,
     blue,
+    green,
+    red,
 };
 
 pub const Save = struct {
@@ -91,9 +92,23 @@ pub fn generateDot(
 
             // Add node to current FSM subgraph
             try writer.print(
-                \\      {d};
+                \\      {d}[{s}];
                 \\
-            , .{node.id});
+            ,
+                .{
+                    node.id,
+                    switch (node.color) {
+                        .blue =>
+                        \\ color = "blue"
+                        ,
+                        .green =>
+                        \\ color = "green"
+                        ,
+                        .red =>
+                        \\ color = "red"
+                    },
+                },
+            );
         }
 
         // Close last subgraph
@@ -107,18 +122,12 @@ pub fn generateDot(
         // Add edges
         for (self.edges.items) |edge| {
             try writer.print(
-                \\    {d} -> {d} [label = "{s}"{s}];
+                \\    {d} -> {d} [label = "{s}"];
                 \\
             , .{
                 edge.from,
                 edge.to,
                 edge.label,
-                switch (edge.color) {
-                    .black => "",
-                    .blue =>
-                    \\ color = "blue"
-                    ,
-                },
             });
         }
 
@@ -388,6 +397,10 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph
             .name = @typeName(State),
             .id = @intCast(state_idx),
             .fsm_name = fsm_name,
+            .color = if (State == ps.Exit) .blue else switch (State.agency) {
+                .client => .green,
+                .server => .red,
+            },
         });
 
         switch (@typeInfo(State)) {
@@ -400,7 +413,6 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph
                     try edges.append(arena_allocator, .{
                         .from = @intCast(state_idx),
                         .to = next_state_idx,
-                        .color = .blue,
                         .label = field.name,
                     });
                 }

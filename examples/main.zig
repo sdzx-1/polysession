@@ -13,9 +13,18 @@ pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
 
-    const graph: ps.Graph = try core.graph(gpa);
-    var stdio_writer = std.fs.File.stdout().writer(&.{});
-    try graph.generateDot(&stdio_writer.interface);
+    var arg_iter = std.process.args();
+    _ = arg_iter.next();
+    if (arg_iter.next()) |arg_str| {
+        std.debug.print("arg_str {s}\n", .{arg_str});
+        if (std.mem.eql(u8, "dot", arg_str)) {
+            const graph: ps.Graph = try core.graph(gpa);
+            const graph_fs = try std.fs.cwd().createFile("t.dot", .{});
+            var graph_fs_writer = graph_fs.writer(try gpa.alloc(u8, 1 << 20));
+            try graph.generateDot(&graph_fs_writer.interface);
+            try graph_fs_writer.interface.flush();
+        }
+    }
 
     //create tmp dir
     var tmp_dir_instance = std.testing.tmpDir(.{});
