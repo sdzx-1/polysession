@@ -74,10 +74,12 @@ pub fn main() !void {
 
             try Runner.runProtocol(
                 .client,
-                StreamChannel{
-                    .reader = stream_reader.interface(),
-                    .writer = &stream_writer.interface,
-                    .log = false,
+                .{
+                    .server = StreamChannel{
+                        .reader = stream_reader.interface(),
+                        .writer = &stream_writer.interface,
+                        .log = false,
+                    },
                 },
                 curr_id,
                 &client_context,
@@ -116,10 +118,12 @@ pub fn main() !void {
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
         .server,
-        StreamChannel{
-            .reader = stream_reader.interface(),
-            .writer = &stream_writer.interface,
-            .log = false,
+        .{
+            .client = StreamChannel{
+                .reader = stream_reader.interface(),
+                .writer = &stream_writer.interface,
+                .log = false,
+            },
         },
         curr_id,
         &server_context,

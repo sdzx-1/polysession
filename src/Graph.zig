@@ -200,6 +200,8 @@ pub fn generateDot(
         \\}
         \\
     );
+
+    try writer.flush();
 }
 
 pub fn generateMermaid(
@@ -397,10 +399,11 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph
             .name = @typeName(State),
             .id = @intCast(state_idx),
             .fsm_name = fsm_name,
-            .color = if (State == ps.Exit) .blue else switch (State.agency) {
-                .client => .green,
-                .server => .red,
-            },
+            .color = .green,
+            // if (State == ps.Exit) .blue else switch (State.agency) {
+            //    .client => .green,
+            //    .server => .red,
+            // },
         });
 
         switch (@typeInfo(State)) {
@@ -435,7 +438,7 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph
     return .{
         .arena = arena,
         .edges = edges,
-        .name = FsmState.protocol,
+        .name = @TypeOf(FsmState.info).Name,
         .nodes = nodes,
     };
 }

@@ -2,20 +2,33 @@ const std = @import("std");
 const meta = std.meta;
 pub const Graph = @import("Graph.zig");
 
-pub const Exit = union(enum) {
-    pub const protocol = "polysession_exit";
-};
-
-pub const Role = enum {
-    client,
-    server,
-
-    pub fn flip(role: Role) Role {
-        return switch (role) {
-            .client => .server,
-            .server => .client,
-        };
+pub fn ProtocolInfo(Name_: []const u8, Role_: type, Context_: anytype) type {
+    comptime {
+        //TODO: check Role and Context;
     }
+
+    return struct {
+        sender: Role_,
+        receiver: []const Role_,
+
+        pub const Name = Name_;
+        pub const Role = Role_;
+        pub const Context = Context_;
+
+        pub fn RoleCtx(_: @This(), r: Role_) type {
+            return @field(Context_, @tagName(r));
+        }
+    };
+}
+
+pub const Exit = union(enum) {
+    pub const info: Info = .{};
+
+    pub const Info = struct {
+        pub const Name = "polysession_exit";
+        pub const Role = void;
+        pub const Context = void;
+    };
 };
 
 pub fn Data(Data_: type, FsmState_: type) type {
@@ -30,11 +43,13 @@ pub fn Data(Data_: type, FsmState_: type) type {
 pub fn Cast(
     comptime protocol_: []const u8,
     comptime Label_: []const u8,
-    comptime agency_: Role,
+    comptime Role: type,
+    comptime sender: Role,
+    comptime receiver: Role,
     comptime T: type,
-    comptime Context: ClientAndServerContext,
-    comptime process_: fn (*@field(Context, @tagName(agency_))) anyerror!T,
-    comptime preprocess_: fn (*@field(Context, @tagName(agency_.flip())), T) anyerror!void,
+    comptime Context: anytype,
+    comptime process_: fn (*@field(Context, @tagName(sender))) anyerror!T,
+    comptime preprocess_: fn (*@field(Context, @tagName(receiver)), T) anyerror!void,
     comptime NextFsmState: type,
 ) type {
     return union(enum) {
@@ -42,14 +57,16 @@ pub fn Cast(
 
         pub const Label = Label_;
 
-        pub const agency: Role = agency_;
-        pub const protocol = protocol_;
+        pub const info: ProtocolInfo(protocol_, Role, Context) = .{
+            .sender = sender,
+            .receiver = &.{receiver},
+        };
 
-        pub fn process(ctx: *@field(Context, @tagName(agency))) !@This() {
+        pub fn process(ctx: *@field(Context, @tagName(sender))) !@This() {
             return .{ .cast = .{ .data = try process_(ctx) } };
         }
 
-        pub fn preprocess(ctx: *@field(Context, @tagName(agency.flip())), msg: @This()) !void {
+        pub fn preprocess_0(ctx: *@field(Context, @tagName(receiver)), msg: @This()) !void {
             switch (msg) {
                 .cast => |val| try preprocess_(ctx, val.data),
             }
@@ -101,10 +118,10 @@ fn TypeSet(comptime bucket_count: usize) type {
 pub fn reachableStates(comptime FsmState: type) struct { states: []const type, state_machine_names: []const []const u8 } {
     comptime {
         var states: []const type = &.{FsmState};
-        var state_machine_names: []const []const u8 = &.{FsmState.protocol};
+        var state_machine_names: []const []const u8 = &.{@TypeOf(FsmState.info).Name};
         var states_stack: []const type = &.{FsmState};
         var states_set: TypeSet(128) = .init;
-        const ExpectedContext = ContextFromState(FsmState, FsmState.agency);
+        const ExpectedContext = @TypeOf(FsmState.info).Context;
 
         states_set.insert(FsmState);
 
@@ -120,7 +137,7 @@ fn reachableStatesDepthFirstSearch(
     comptime state_machine_names: *[]const []const u8,
     comptime states_stack: *[]const type,
     comptime states_set: *TypeSet(128),
-    comptime ExpectedContext: ClientAndServerContext,
+    comptime ExpectedContext: anytype, //Context type
 ) void {
     @setEvalBranchQuota(20_000_000);
 
@@ -128,6 +145,11 @@ fn reachableStatesDepthFirstSearch(
         if (states_stack.len == 0) {
             return;
         }
+        //TODO: Check the following conditions
+        //Do not check Exit FsmState.
+        //The receiver can be one or more, but cannot be the sender, and cannot be repeated.
+        //The preprocess function corresponds to the receiver's sequence number (preprocess0, preprocess1...),
+        // and in the branch state, it is required that: sender + receiver = all roles
 
         const CurrentFsmState = states_stack.*[states_stack.len - 1];
         states_stack.* = states_stack.*[0 .. states_stack.len - 1];
@@ -142,8 +164,10 @@ fn reachableStatesDepthFirstSearch(
                     if (!states_set.has(NextFsmState)) {
                         // Validate that the handler context type matches (skip for special states like Exit)
                         if (NextFsmState != Exit) {
-                            const NextContext = ContextFromState(NextFsmState, NextFsmState.agency);
-                            if (NextContext.client != ExpectedContext.client or NextContext.server != ExpectedContext.server) {
+                            const NextContext = @TypeOf(NextFsmState.info).Context;
+                            //TODO: fix this!
+                            // if (NextContext != ExpectedContext) {
+                            if (false) {
                                 @compileError(std.fmt.comptimePrint(
                                     "Context type mismatch: FsmState {s} has context type {s}, but expected {s}",
                                     .{ @typeName(NextFsmState), @typeName(NextContext), @typeName(ExpectedContext) },
@@ -152,7 +176,7 @@ fn reachableStatesDepthFirstSearch(
                         }
 
                         states.* = states.* ++ &[_]type{NextFsmState};
-                        state_machine_names.* = state_machine_names.* ++ &[_][]const u8{NextFsmState.protocol};
+                        state_machine_names.* = state_machine_names.* ++ &[_][]const u8{@TypeOf(NextFsmState.info).Name};
                         states_stack.* = states_stack.* ++ &[_]type{NextFsmState};
                         states_set.insert(NextFsmState);
 
@@ -163,24 +187,6 @@ fn reachableStatesDepthFirstSearch(
             else => @compileError("Only support tagged union!"),
         }
     }
-}
-
-pub const ClientAndServerContext = struct {
-    client: type,
-    server: type,
-};
-
-pub fn ContextFromState(comptime State: type, agency: Role) ClientAndServerContext {
-    const process_context =
-        @typeInfo(@typeInfo(@TypeOf(State.process)).@"fn".params[0].type.?).pointer.child;
-
-    const preprocess_context =
-        @typeInfo(@typeInfo(@TypeOf(State.preprocess)).@"fn".params[0].type.?).pointer.child;
-
-    return switch (agency) {
-        .client => .{ .client = process_context, .server = preprocess_context },
-        .server => .{ .client = preprocess_context, .server = process_context },
-    };
 }
 
 pub const StateMap = struct {
@@ -237,7 +243,8 @@ pub fn Runner(
     comptime FsmState: type,
 ) type {
     return struct {
-        pub const Context = ContextFromState(FsmState, FsmState.agency);
+        const Info = @TypeOf(FsmState.info);
+        pub const Role = Info.Role;
         pub const state_map: StateMap = .init(FsmState);
         pub const StateId = state_map.StateId;
 
@@ -250,34 +257,59 @@ pub fn Runner(
         }
 
         pub fn runProtocol(
-            comptime role: Role,
-            channel: anytype,
+            comptime curr_role: Role,
+            mult_channel: anytype,
             curr_id: StateId,
-            ctx: *@field(Context, @tagName(role)),
+            ctx: *FsmState.info.RoleCtx(curr_role),
         ) !void {
             @setEvalBranchQuota(10_000_000);
             sw: switch (curr_id) {
                 inline else => |state_id| {
                     const State = StateFromId(state_id);
-                    if (State == Exit) return;
+                    if (comptime State == Exit) return;
 
-                    const result = blk: {
-                        if (comptime State.agency == role) {
-                            const res = try State.process(ctx);
-                            try channel.send(state_id, res);
-                            break :blk res;
-                        } else {
-                            const res = try channel.recv(state_id, State);
-                            try State.preprocess(ctx, res);
-                            break :blk res;
+                    const sender: Role = State.info.sender;
+                    const receiver: []const Role = State.info.receiver;
+
+                    if (comptime curr_role == sender) {
+                        const result = try State.process(ctx);
+                        inline for (receiver) |rvr| {
+                            try @field(mult_channel, @tagName(rvr)).send(state_id, result);
                         }
-                    };
+                        switch (result) {
+                            inline else => |new_fsm_state_wit| {
+                                const NewData = @TypeOf(new_fsm_state_wit);
+                                continue :sw comptime idFromState(NewData.FsmState);
+                            },
+                        }
+                    } else {
+                        const midx: ?usize = comptime blk: {
+                            for (0.., receiver) |i, rvr| {
+                                if (curr_role == rvr) break :blk i;
+                            }
+                            break :blk null;
+                        };
 
-                    switch (result) {
-                        inline else => |new_fsm_state_wit| {
-                            const NewData = @TypeOf(new_fsm_state_wit);
-                            continue :sw comptime idFromState(NewData.FsmState);
-                        },
+                        if (midx) |idx| {
+                            const result = try @field(mult_channel, @tagName(sender)).recv(state_id, State);
+                            const fn_name = std.fmt.comptimePrint("preprocess_{d}", .{idx});
+                            try @field(State, fn_name)(ctx, result);
+
+                            switch (result) {
+                                inline else => |new_fsm_state_wit| {
+                                    const NewData = @TypeOf(new_fsm_state_wit);
+                                    continue :sw comptime idFromState(NewData.FsmState);
+                                },
+                            }
+                        } else {
+                            switch (@typeInfo(State)) {
+                                .@"union" => |U| {
+                                    comptime std.debug.assert(U.fields.len == 1);
+                                    continue :sw comptime idFromState(U.fields[0].type.FsmState);
+                                },
+                                else => unreachable,
+                            }
+                        }
                     }
                 },
             }

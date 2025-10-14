@@ -13,13 +13,15 @@ pub const ClientContext = struct {
     recv_context: sendfile.RecvContext,
 };
 
-pub const Context: ps.ClientAndServerContext = .{
-    .client = ClientContext,
-    .server = ServerContext,
+pub const Role = enum { client, server };
+
+pub const Context = struct {
+    client: type = ClientContext,
+    server: type = ServerContext,
 };
 
-const PingPong = pingpong.MkPingPong(.client, Context, .pingpong, .pingpong);
-const SendFile = sendfile.MkSendFile(.server, Context, 20 * 1024 * 1024, .send_context, .recv_context);
+const PingPong = pingpong.MkPingPong(Role, .client, .server, Context{}, .pingpong, .pingpong);
+const SendFile = sendfile.MkSendFile(Role, .server, .client, Context{}, 20 * 1024 * 1024, .send_context, .recv_context);
 
 pub const EnterFsmState = PingPong.Start(SendFile.Start(PingPong.Start(ps.Exit), ps.Exit));
 
