@@ -32,7 +32,7 @@ pub fn MkSendFile(
             Successed_NextFsmState: type,
             Failed_NextFsmState: type,
         ) type {
-            const InitSendFile = struct {
+            const Tmp = struct {
                 pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !u64 {
                     const ctx = sender_ctxFromParent(parent_ctx);
                     return ctx.file_size;
@@ -49,7 +49,9 @@ pub fn MkSendFile(
                 "init send file",
                 sender,
                 u64,
-                InitSendFile,
+                Context,
+                Tmp.process,
+                Tmp.preprocess,
                 Send(Successed_NextFsmState, Failed_NextFsmState),
             );
         }
@@ -66,7 +68,9 @@ pub fn MkSendFile(
                     "init check hash",
                     sender,
                     u64,
-                    InitCheckHash,
+                    Context,
+                    Tmp.process,
+                    Tmp.preprocess,
                     CheckHash(Successed_NextFsmState, Failed_NextFsmState),
                 )),
                 final_zero: Data(void, Successed_NextFsmState),
@@ -135,7 +139,7 @@ pub fn MkSendFile(
                     }
                 }
 
-                const InitCheckHash = struct {
+                const Tmp = struct {
                     pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !u64 {
                         const ctx = sender_ctxFromParent(parent_ctx);
                         return ctx.hasher.final();

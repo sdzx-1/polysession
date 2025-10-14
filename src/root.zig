@@ -32,7 +32,9 @@ pub fn Cast(
     comptime Label_: []const u8,
     comptime agency_: Role,
     comptime T: type,
-    comptime CastFn: type,
+    comptime Context: ClientAndServerContext,
+    comptime process_: fn (*@field(Context, @tagName(agency_))) anyerror!T,
+    comptime preprocess_: fn (*@field(Context, @tagName(agency_.flip())), T) anyerror!void,
     comptime NextFsmState: type,
 ) type {
     return union(enum) {
@@ -43,15 +45,13 @@ pub fn Cast(
         pub const agency: Role = agency_;
         pub const protocol = protocol_;
 
-        const ConfigContext = ContextFromState(CastFn, agency);
-
-        pub fn process(ctx: *@field(ConfigContext, @tagName(agency))) !@This() {
-            return .{ .cast = .{ .data = try CastFn.process(ctx) } };
+        pub fn process(ctx: *@field(Context, @tagName(agency))) !@This() {
+            return .{ .cast = .{ .data = try process_(ctx) } };
         }
 
-        pub fn preprocess(ctx: *@field(ConfigContext, @tagName(agency.flip())), msg: @This()) !void {
+        pub fn preprocess(ctx: *@field(Context, @tagName(agency.flip())), msg: @This()) !void {
             switch (msg) {
-                .cast => |val| try CastFn.preprocess(ctx, val.data),
+                .cast => |val| try preprocess_(ctx, val.data),
             }
         }
     };
