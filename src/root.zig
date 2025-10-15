@@ -164,13 +164,21 @@ fn reachableStatesDepthFirstSearch(
                     if (!states_set.has(NextFsmState)) {
                         // Validate that the handler context type matches (skip for special states like Exit)
                         if (NextFsmState != Exit) {
-                            const NextContext = @TypeOf(NextFsmState.info).Context;
-                            //TODO: fix this!
-                            // if (NextContext != ExpectedContext) {
-                            if (false) {
+                            const Info = @TypeOf(NextFsmState.info);
+                            const NextContext = Info.Context;
+                            const Role = Info.Role;
+                            const is_equal: bool = blk: {
+                                for (@typeInfo(Role).@"enum".fields) |F| {
+                                    if (@field(NextContext, F.name) != @field(ExpectedContext, F.name)) {
+                                        break :blk false;
+                                    }
+                                }
+                                break :blk true;
+                            };
+                            if (!is_equal) {
                                 @compileError(std.fmt.comptimePrint(
-                                    "Context type mismatch: FsmState {s} has context type {s}, but expected {s}",
-                                    .{ @typeName(NextFsmState), @typeName(NextContext), @typeName(ExpectedContext) },
+                                    "Context type mismatch: FsmState {any}\nhas context type {any}\nbut expected {any}",
+                                    .{ NextFsmState, NextContext, ExpectedContext },
                                 ));
                             }
                         }
