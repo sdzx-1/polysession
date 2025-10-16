@@ -15,15 +15,15 @@ pub fn MkPingPong(
     comptime Role: type,
     comptime client: Role,
     comptime server: Role,
-    comptime Context: anytype,
-    comptime client_ctx_field: std.meta.FieldEnum(@field(Context, @tagName(client))),
-    comptime server_ctx_field: std.meta.FieldEnum(@field(Context, @tagName(server))),
+    comptime context: anytype,
+    comptime client_ctx_field: std.meta.FieldEnum(@field(context, @tagName(client))),
+    comptime server_ctx_field: std.meta.FieldEnum(@field(context, @tagName(server))),
 ) type {
     return struct {
         fn pingpogn_info(
             sender: Role,
             receiver: []const Role,
-        ) ps.ProtocolInfo("pingpong", Role, Context) {
+        ) ps.ProtocolInfo("pingpong", Role, context) {
             return .{ .sender = sender, .receiver = receiver };
         }
 
@@ -36,7 +36,7 @@ pub fn MkPingPong(
                     server,
                     client,
                     i32,
-                    Context,
+                    context,
                     PongFn.process,
                     PongFn.preprocess,
                     @This(),
@@ -67,22 +67,22 @@ pub fn MkPingPong(
         }
 
         const PongFn = struct {
-            pub fn process(parent_ctx: *@field(Context, @tagName(server))) !i32 {
+            pub fn process(parent_ctx: *@field(context, @tagName(server))) !i32 {
                 const ctx = server_ctxFromParent(parent_ctx);
                 ctx.server_counter += 1;
                 return ctx.server_counter;
             }
 
-            pub fn preprocess(parent_ctx: *@field(Context, @tagName(client)), val: i32) !void {
+            pub fn preprocess(parent_ctx: *@field(context, @tagName(client)), val: i32) !void {
                 const ctx = client_ctxFromParent(parent_ctx);
                 ctx.client_counter = val;
             }
         };
-        fn client_ctxFromParent(parent_ctx: *@field(Context, @tagName(client))) *ClientContext {
+        fn client_ctxFromParent(parent_ctx: *@field(context, @tagName(client))) *ClientContext {
             return &@field(parent_ctx, @tagName(client_ctx_field));
         }
 
-        fn server_ctxFromParent(parent_ctx: *@field(Context, @tagName(server))) *ServerContext {
+        fn server_ctxFromParent(parent_ctx: *@field(context, @tagName(server))) *ServerContext {
             return &@field(parent_ctx, @tagName(server_ctx_field));
         }
     };

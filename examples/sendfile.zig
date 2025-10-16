@@ -24,16 +24,16 @@ pub fn MkSendFile(
     comptime Role: type,
     comptime sender: Role,
     comptime receiver: Role,
-    comptime Context: anytype,
+    comptime context: anytype,
     comptime batch_size: usize,
-    comptime sender_ctx_field: std.meta.FieldEnum(@field(Context, @tagName(sender))),
-    comptime recver_ctx_field: std.meta.FieldEnum(@field(Context, @tagName(receiver))),
+    comptime sender_ctx_field: std.meta.FieldEnum(@field(context, @tagName(sender))),
+    comptime recver_ctx_field: std.meta.FieldEnum(@field(context, @tagName(receiver))),
 ) type {
     return struct {
         fn sendfile_info(
             sender_: Role,
             receiver_: []const Role,
-        ) ps.ProtocolInfo("sendfile", Role, Context) {
+        ) ps.ProtocolInfo("sendfile", Role, context) {
             return .{ .sender = sender_, .receiver = receiver_ };
         }
 
@@ -42,12 +42,12 @@ pub fn MkSendFile(
             Failed_NextFsmState: type,
         ) type {
             const Tmp = struct {
-                pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !u64 {
+                pub fn process(parent_ctx: *@field(context, @tagName(sender))) !u64 {
                     const ctx = sender_ctxFromParent(parent_ctx);
                     return ctx.file_size;
                 }
 
-                pub fn preprocess(parent_ctx: *@field(Context, @tagName(receiver)), msg: u64) !void {
+                pub fn preprocess(parent_ctx: *@field(context, @tagName(receiver)), msg: u64) !void {
                     const ctx = recver_ctxFromParent(parent_ctx);
                     ctx.total = msg;
                 }
@@ -60,7 +60,7 @@ pub fn MkSendFile(
                 sender,
                 receiver,
                 u64,
-                Context,
+                context,
                 Tmp.process,
                 Tmp.preprocess,
                 Send(Successed_NextFsmState, Failed_NextFsmState),
@@ -81,7 +81,7 @@ pub fn MkSendFile(
                     sender,
                     receiver,
                     u64,
-                    Context,
+                    context,
                     Tmp.process,
                     Tmp.preprocess,
                     CheckHash(Successed_NextFsmState, Failed_NextFsmState),
@@ -90,7 +90,7 @@ pub fn MkSendFile(
 
                 pub const info = sendfile_info(sender, &.{receiver});
 
-                pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !@This() {
+                pub fn process(parent_ctx: *@field(context, @tagName(sender))) !@This() {
                     const ctx = sender_ctxFromParent(parent_ctx);
                     if (ctx.send_size >= batch_size) {
                         ctx.send_size = 0;
@@ -114,7 +114,7 @@ pub fn MkSendFile(
                     }
                 }
 
-                pub fn preprocess_0(parent_ctx: *@field(Context, @tagName(receiver)), msg: @This()) !void {
+                pub fn preprocess_0(parent_ctx: *@field(context, @tagName(receiver)), msg: @This()) !void {
                     const ctx = recver_ctxFromParent(parent_ctx);
                     var size: usize = 0;
                     switch (msg) {
@@ -152,12 +152,12 @@ pub fn MkSendFile(
                 }
 
                 const Tmp = struct {
-                    pub fn process(parent_ctx: *@field(Context, @tagName(sender))) !u64 {
+                    pub fn process(parent_ctx: *@field(context, @tagName(sender))) !u64 {
                         const ctx = sender_ctxFromParent(parent_ctx);
                         return ctx.hasher.final();
                     }
 
-                    pub fn preprocess(parent_ctx: *@field(Context, @tagName(receiver)), msg: u64) !void {
+                    pub fn preprocess(parent_ctx: *@field(context, @tagName(receiver)), msg: u64) !void {
                         const ctx = recver_ctxFromParent(parent_ctx);
                         ctx.recved_hash = msg;
                     }
@@ -175,7 +175,7 @@ pub fn MkSendFile(
 
                 pub const info = sendfile_info(receiver, &.{sender});
 
-                pub fn process(parent_ctx: *@field(Context, @tagName(receiver))) !@This() {
+                pub fn process(parent_ctx: *@field(context, @tagName(receiver))) !@This() {
                     const ctx = recver_ctxFromParent(parent_ctx);
                     const curr_hash = ctx.hasher.final();
                     ctx.hasher = std.hash.XxHash3.init(0);
@@ -187,7 +187,7 @@ pub fn MkSendFile(
                         return .{ .Failed = .{ .data = {} } };
                     }
                 }
-                pub fn preprocess_0(parent_ctx: *@field(Context, @tagName(sender)), msg: @This()) !void {
+                pub fn preprocess_0(parent_ctx: *@field(context, @tagName(sender)), msg: @This()) !void {
                     const ctx = sender_ctxFromParent(parent_ctx);
                     _ = ctx;
                     switch (msg) {
@@ -198,11 +198,11 @@ pub fn MkSendFile(
             };
         }
 
-        fn sender_ctxFromParent(parent_ctx: *@field(Context, @tagName(sender))) *SendContext {
+        fn sender_ctxFromParent(parent_ctx: *@field(context, @tagName(sender))) *SendContext {
             return &@field(parent_ctx, @tagName(sender_ctx_field));
         }
 
-        fn recver_ctxFromParent(parent_ctx: *@field(Context, @tagName(receiver))) *RecvContext {
+        fn recver_ctxFromParent(parent_ctx: *@field(context, @tagName(receiver))) *RecvContext {
             return &@field(parent_ctx, @tagName(recver_ctx_field));
         }
     };

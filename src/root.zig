@@ -2,7 +2,7 @@ const std = @import("std");
 const meta = std.meta;
 pub const Graph = @import("Graph.zig");
 
-pub fn ProtocolInfo(Name_: []const u8, Role_: type, Context_: anytype) type {
+pub fn ProtocolInfo(Name_: []const u8, Role_: type, context_: anytype) type {
     comptime {
         //TODO: check Role and Context;
     }
@@ -13,10 +13,10 @@ pub fn ProtocolInfo(Name_: []const u8, Role_: type, Context_: anytype) type {
 
         pub const Name = Name_;
         pub const Role = Role_;
-        pub const Context = Context_;
+        pub const context = context_;
 
         pub fn RoleCtx(_: @This(), r: Role_) type {
-            return @field(Context_, @tagName(r));
+            return @field(context_, @tagName(r));
         }
     };
 }
@@ -121,7 +121,7 @@ pub fn reachableStates(comptime FsmState: type) struct { states: []const type, s
         var state_machine_names: []const []const u8 = &.{@TypeOf(FsmState.info).Name};
         var states_stack: []const type = &.{FsmState};
         var states_set: TypeSet(128) = .init;
-        const ExpectedContext = @TypeOf(FsmState.info).Context;
+        const ExpectedContext = @TypeOf(FsmState.info).context;
 
         states_set.insert(FsmState);
 
@@ -165,7 +165,7 @@ fn reachableStatesDepthFirstSearch(
                         // Validate that the handler context type matches (skip for special states like Exit)
                         if (NextFsmState != Exit) {
                             const Info = @TypeOf(NextFsmState.info);
-                            const NextContext = Info.Context;
+                            const NextContext = Info.context;
                             const Role = Info.Role;
                             const is_equal: bool = blk: {
                                 for (@typeInfo(Role).@"enum".fields) |F| {
