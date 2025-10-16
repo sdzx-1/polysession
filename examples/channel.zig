@@ -8,15 +8,16 @@ pub const StreamChannel = struct {
     writer: *std.Io.Writer,
     reader: *std.Io.Reader,
     log: bool = false,
+    perfix: []const u8 = &.{},
 
     pub fn recv(self: @This(), state_id: anytype, T: type) !T {
         const res = try Codec.decode(self.reader, state_id, T);
-        if (self.log) std.debug.print("recv: {any}\n", .{res});
+        if (self.log) std.debug.print("recv form {s}: {any}\n", .{ self.perfix, res });
         return res;
     }
 
     pub fn send(self: @This(), state_id: anytype, val: anytype) !void {
-        if (self.log) std.debug.print("send: {any}\n", .{val});
+        if (self.log) std.debug.print("send to   {s}: {any}\n", .{ self.perfix, val });
         try Codec.encode(self.writer, state_id, val);
     }
 };

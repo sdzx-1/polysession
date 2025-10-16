@@ -9,6 +9,10 @@ pub fn encode(writer: *std.Io.Writer, state_id: anytype, val: anytype) !void {
             const data = msg.data;
             switch (@typeInfo(@TypeOf(data))) {
                 .void => {},
+                .bool => {
+                    const v: u8 = if (data) 1 else 0;
+                    try writer.writeInt(u8, v, .little);
+                },
                 .int => {
                     try writer.writeInt(@TypeOf(data), data, .little);
                 },
@@ -34,9 +38,8 @@ pub fn encode(writer: *std.Io.Writer, state_id: anytype, val: anytype) !void {
 
 pub fn decode(reader: *std.Io.Reader, state_id: anytype, T: type) !T {
     const id: u8 = @intFromEnum(state_id);
-    const sid = try reader.takeByte();
-    std.debug.assert(id == sid);
-    if (id != sid) return error.IncorrectStatusReceived;
+    const rid = try reader.takeByte();
+    if (id != rid) return error.IncorrectStatusReceived;
     const recv_tag_num = try reader.takeByte();
     const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
     switch (tag) {
@@ -45,6 +48,15 @@ pub fn decode(reader: *std.Io.Reader, state_id: anytype, T: type) !T {
             switch (@typeInfo(Data)) {
                 .void => {
                     return @unionInit(T, @tagName(t), .{ .data = {} });
+                },
+                .bool => {
+                    const data = try reader.takeInt(u8, .little);
+                    const bv: bool = switch (data) {
+                        0 => false,
+                        1 => true,
+                        else => unreachable,
+                    };
+                    return @unionInit(T, @tagName(t), .{ .data = bv });
                 },
                 .int => {
                     const data = try reader.takeInt(Data, .little);
