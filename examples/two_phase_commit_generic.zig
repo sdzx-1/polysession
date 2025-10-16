@@ -5,9 +5,20 @@ const StreamChannel = @import("channel.zig").StreamChannel;
 const net = std.net;
 
 pub fn main() !void {
-    const localhost0 = try net.Address.parseIp("127.0.0.1", 8883);
+    var xorshiro256: std.Random.Xoshiro256 = undefined;
+    const ptr: *[4 * 64]u8 = @ptrCast(&xorshiro256.s);
+    std.crypto.random.bytes(ptr);
+    const random = xorshiro256.random();
 
-    const localhost1 = try net.Address.parseIp("127.0.0.1", 8884);
+    const localhost0 = try net.Address.parseIp(
+        "127.0.0.1",
+        random.intRangeAtMost(u16, 10000, 1 << 15),
+    );
+
+    const localhost1 = try net.Address.parseIp(
+        "127.0.0.1",
+        random.intRangeAtMost(u16, 10000, 1 << 15),
+    );
 
     const alice = struct {
         fn clientFn(addr0: net.Address, addr1: net.Address) !void {
@@ -238,7 +249,7 @@ pub fn mk_2pc(
 
                 pub fn process(ctx: *info.RoleCtx(alice)) !@This() {
                     const random: std.Random = ctx.xoshiro256.random();
-                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 50;
+                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 20;
                     return .{ .resp = .{ .data = res } };
                 }
 
@@ -259,7 +270,7 @@ pub fn mk_2pc(
 
                 pub fn process(ctx: *info.RoleCtx(bob)) !@This() {
                     const random: std.Random = ctx.xoshiro256.random();
-                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 50;
+                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 20;
                     return .{ .resp = .{ .data = res } };
                 }
 
