@@ -148,6 +148,7 @@ pub fn main() !void {
 
     var charlie_context: CharlieContext = undefined;
     charlie_context.counter = 0;
+    charlie_context.times_2pc = 0;
     const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
     std.crypto.random.bytes(fill_ptr);
 
@@ -171,7 +172,6 @@ pub fn main() !void {
         curr_id,
         &charlie_context,
     );
-    // std.Thread.sleep(std.time.ns_per_s * 1);
 }
 
 const AllRole = enum { alice, bob, charlie };
@@ -189,6 +189,7 @@ const BobContext = struct {
 const CharlieContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
+    times_2pc: u32,
 };
 
 const Context = struct {
@@ -197,16 +198,58 @@ const Context = struct {
     charlie: type = CharlieContext,
 };
 
-const CAB_TwoPC = mk_2pc(AllRole, .charlie, .alice, .bob, Context{});
-const ABC_TwoPC = mk_2pc(AllRole, .alice, .bob, .charlie, Context{});
-const BAC_TwoPC = mk_2pc(AllRole, .bob, .alice, .charlie, Context{});
-
-pub const EnterFsmState = CAB_TwoPC.Start(ABC_TwoPC.Start(BAC_TwoPC.Start(ps.Exit)));
+// pub const EnterFsmState = CAB.Start(ABC.Start(BAC.Start(ps.Exit)));
+pub const EnterFsmState = Random2pc;
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);
 
-pub fn mk_2pc(
+const CAB = mk2pc(AllRole, .charlie, .alice, .bob, Context{});
+const ABC = mk2pc(AllRole, .alice, .bob, .charlie, Context{});
+const BAC = mk2pc(AllRole, .bob, .alice, .charlie, Context{});
+
+//Randomly select a 2pc protocol
+pub const Random2pc = union(enum) {
+    charlie_as_coordinator: Data(void, CAB.Start(@This())),
+    alice_as_coordinator: Data(void, ABC.Start(@This())),
+    bob_as_coordinator: Data(void, BAC.Start(@This())),
+    exit: Data(void, ps.Exit),
+
+    pub const info: ps.ProtocolInfo("random_2pc", AllRole, Context{}) = .{
+        .sender = .charlie,
+        .receiver = &.{ .alice, .bob },
+    };
+
+    pub fn process(ctx: *CharlieContext) !@This() {
+        ctx.times_2pc += 1;
+        std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
+        if (ctx.times_2pc > 10) {
+            return .{ .exit = .{ .data = {} } };
+        }
+
+        const random: std.Random = ctx.xoshiro256.random();
+        const res = random.intRangeAtMost(u8, 0, 2);
+        switch (res) {
+            0 => return .{ .charlie_as_coordinator = .{ .data = {} } },
+            1 => return .{ .alice_as_coordinator = .{ .data = {} } },
+            2 => return .{ .bob_as_coordinator = .{ .data = {} } },
+            else => unreachable,
+        }
+    }
+
+    pub fn preprocess_0(ctx: *AliceContext, msg: @This()) !void {
+        _ = ctx;
+        _ = msg;
+    }
+
+    pub fn preprocess_1(ctx: *BobContext, msg: @This()) !void {
+        _ = ctx;
+        _ = msg;
+    }
+};
+
+//
+pub fn mk2pc(
     Role: type,
     coordinator: Role,
     alice: Role,
@@ -249,7 +292,7 @@ pub fn mk_2pc(
 
                 pub fn process(ctx: *info.RoleCtx(alice)) !@This() {
                     const random: std.Random = ctx.xoshiro256.random();
-                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 20;
+                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
                     return .{ .resp = .{ .data = res } };
                 }
 
@@ -270,7 +313,7 @@ pub fn mk_2pc(
 
                 pub fn process(ctx: *info.RoleCtx(bob)) !@This() {
                     const random: std.Random = ctx.xoshiro256.random();
-                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 20;
+                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
                     return .{ .resp = .{ .data = res } };
                 }
 
