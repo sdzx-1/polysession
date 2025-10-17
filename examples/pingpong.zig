@@ -29,18 +29,7 @@ pub fn MkPingPong(
 
         pub fn Start(NextFsmState: type) type {
             return union(enum) {
-                ping: Data(i32, ps.Cast(
-                    "pingpong",
-                    "pong",
-                    Role,
-                    server,
-                    client,
-                    i32,
-                    context,
-                    PongFn.process,
-                    PongFn.preprocess,
-                    @This(),
-                )),
+                ping: Data(i32, ps.Cast("pingpong", context, server, client, i32, PongFn, @This())),
                 next: Data(void, NextFsmState),
 
                 pub const info = pingpogn_info(client, &.{server});

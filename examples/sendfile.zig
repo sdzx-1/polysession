@@ -37,10 +37,7 @@ pub fn MkSendFile(
             return .{ .sender = sender_, .receiver = receiver_ };
         }
 
-        pub fn Start(
-            Successed_NextFsmState: type,
-            Failed_NextFsmState: type,
-        ) type {
+        pub fn Start(Successed: type, Failed: type) type {
             const Tmp = struct {
                 pub fn process(parent_ctx: *@field(context, @tagName(sender))) !u64 {
                     const ctx = sender_ctxFromParent(parent_ctx);
@@ -52,41 +49,17 @@ pub fn MkSendFile(
                     ctx.total = msg;
                 }
             };
-
-            return ps.Cast(
-                "sendfile",
-                "init send file",
-                Role,
-                sender,
-                receiver,
-                u64,
-                context,
-                Tmp.process,
-                Tmp.preprocess,
-                Send(Successed_NextFsmState, Failed_NextFsmState),
-            );
+            return ps.Cast("sendfile", context, sender, receiver, u64, Tmp, Send(Successed, Failed));
         }
 
-        pub fn Send(
-            Successed_NextFsmState: type,
-            Failed_NextFsmState: type,
-        ) type {
+        pub fn Send(Successed: type, Failed: type) type {
             return union(enum) {
-                check: Data(u64, CheckHash(@This(), Failed_NextFsmState)),
-                send: Data([]const u8, @This()),
-                final: Data([]const u8, ps.Cast(
-                    "sendfile",
-                    "init check hash",
-                    Role,
-                    sender,
-                    receiver,
-                    u64,
-                    context,
-                    Tmp.process,
-                    Tmp.preprocess,
-                    CheckHash(Successed_NextFsmState, Failed_NextFsmState),
-                )),
-                final_zero: Data(void, Successed_NextFsmState),
+                // zig fmt: off
+                check     : Data(u64       , CheckHash(@This(), Failed)),
+                send      : Data([]const u8, @This()),
+                final     : Data([]const u8, ps.Cast("sendfile", context, sender, receiver, u64, Tmp, CheckHash(Successed, Failed))),
+                final_zero: Data(void      , Successed),
+               // zig fmt: on
 
                 pub const info = sendfile_info(sender, &.{receiver});
 
@@ -165,13 +138,10 @@ pub fn MkSendFile(
             };
         }
 
-        pub fn CheckHash(
-            Successed_NextFsmState: type,
-            Failed_NextFsmState: type,
-        ) type {
+        pub fn CheckHash(Successed: type, Failed: type) type {
             return union(enum) {
-                Successed: Data(void, Successed_NextFsmState),
-                Failed: Data(void, Failed_NextFsmState),
+                Successed: Data(void, Successed),
+                Failed: Data(void, Failed),
 
                 pub const info = sendfile_info(receiver, &.{sender});
 

@@ -41,34 +41,30 @@ pub fn Data(Data_: type, FsmState_: type) type {
 }
 
 pub fn Cast(
-    comptime protocol_: []const u8,
-    comptime Label_: []const u8,
-    comptime Role: type,
-    comptime sender: Role,
-    comptime receiver: Role,
+    comptime protocol: []const u8,
+    comptime context: anytype,
+    comptime sender: anytype,
+    comptime receiver: anytype,
     comptime T: type,
-    comptime Context: anytype,
-    comptime process_: fn (*@field(Context, @tagName(sender))) anyerror!T,
-    comptime preprocess_: fn (*@field(Context, @tagName(receiver)), T) anyerror!void,
+    comptime CastFn: type,
     comptime NextFsmState: type,
 ) type {
+    std.debug.assert(@TypeOf(sender) == @TypeOf(receiver));
     return union(enum) {
         cast: Data(T, NextFsmState),
 
-        pub const Label = Label_;
-
-        pub const info: ProtocolInfo(protocol_, Role, Context) = .{
+        pub const info: ProtocolInfo(protocol, @TypeOf(sender), context) = .{
             .sender = sender,
             .receiver = &.{receiver},
         };
 
-        pub fn process(ctx: *@field(Context, @tagName(sender))) !@This() {
-            return .{ .cast = .{ .data = try process_(ctx) } };
+        pub fn process(ctx: *@field(context, @tagName(sender))) !@This() {
+            return .{ .cast = .{ .data = try CastFn.process(ctx) } };
         }
 
-        pub fn preprocess_0(ctx: *@field(Context, @tagName(receiver)), msg: @This()) !void {
+        pub fn preprocess_0(ctx: *@field(context, @tagName(receiver)), msg: @This()) !void {
             switch (msg) {
-                .cast => |val| try preprocess_(ctx, val.data),
+                .cast => |val| try CastFn.preprocess(ctx, val.data),
             }
         }
     };
