@@ -13,7 +13,9 @@ pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
 
-    var arg_iter = std.process.args();
+    var arg_iter = try std.process.argsWithAllocator(gpa);
+    defer arg_iter.deinit();
+
     _ = arg_iter.next();
     if (arg_iter.next()) |arg_str| {
         std.debug.print("arg_str {s}\n", .{arg_str});
