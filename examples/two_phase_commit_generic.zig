@@ -193,44 +193,58 @@ pub fn main() !void {
     std.crypto.random.bytes(ptr);
     const random = xorshiro256.random();
 
-    const localhost0 = try net.Address.parseIp(
+    const start_address = random.intRangeAtMost(u16, 10000, (1 << 15) - 2);
+
+    const alice_bob_address = try net.Address.parseIp(
         "127.0.0.1",
-        random.intRangeAtMost(u16, 10000, 1 << 15),
+        start_address,
     );
 
-    const localhost1 = try net.Address.parseIp(
+    const bob_charlie_address = try net.Address.parseIp(
         "127.0.0.1",
-        random.intRangeAtMost(u16, 10000, 1 << 15),
+        start_address + 1,
     );
+
+    const charlie_alice_address = try net.Address.parseIp(
+        "127.0.0.1",
+        start_address + 2,
+    );
+
+    // waiting for connection: (bob, charlie)
+    // connection:             alice -> bob
+    // waiting for connection: (alice, charlie)
+    // connection:             bob -> charlie
+    // waiting for connection: (alice)
+    // connection:             charlie -> alice
 
     const alice = struct {
-        fn clientFn(addr0: net.Address, addr1: net.Address) !void {
-            const socket = try net.tcpConnectToAddress(addr0);
-            defer socket.close();
+        fn clientFn(
+            alice_bob_addr: net.Address,
+            charlie_alice_addr: net.Address,
+        ) !void {
+            const alice_bob_stream = try net.tcpConnectToAddress(alice_bob_addr);
+            defer alice_bob_stream.close();
+
+            var charlie_alice_server = try charlie_alice_addr.listen(.{});
+            defer charlie_alice_server.deinit();
+
+            const charlie_alice_stream = (try charlie_alice_server.accept()).stream;
+            defer charlie_alice_stream.close();
 
             var reader_buf: [10]u8 = undefined;
             var writer_buf: [10]u8 = undefined;
+            var stream_reader = charlie_alice_stream.reader(&reader_buf);
+            var stream_writer = charlie_alice_stream.writer(&writer_buf);
 
-            var stream_reader = socket.reader(&reader_buf);
-            var stream_writer = socket.writer(&writer_buf);
+            var bob_reader_buf: [10]u8 = undefined;
+            var bob_writer_buf: [10]u8 = undefined;
+            var bob_stream_reader = alice_bob_stream.reader(&bob_reader_buf);
+            var bob_stream_writer = alice_bob_stream.writer(&bob_writer_buf);
 
             var alice_context: AliceContext = undefined;
             alice_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
-
-            //
-            var alice_server = try addr1.listen(.{});
-            defer alice_server.deinit();
-
-            var bob_client = try alice_server.accept();
-            defer bob_client.stream.close();
-
-            var bob_reader_buf: [10]u8 = undefined;
-            var bob_writer_buf: [10]u8 = undefined;
-
-            var bob_stream_reader = bob_client.stream.reader(&bob_reader_buf);
-            var bob_stream_writer = bob_client.stream.writer(&bob_writer_buf);
 
             try Runner.runProtocol(
                 .alice,
@@ -253,35 +267,37 @@ pub fn main() !void {
         }
     };
 
-    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{ localhost0, localhost1 });
+    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{ alice_bob_address, charlie_alice_address });
     defer alice_thread.join();
 
     const bob = struct {
-        fn clientFn(addr0: net.Address, addr1: net.Address) !void {
-            std.Thread.sleep(std.time.ns_per_ms * 100); //Let alice connect first
-            const socket = try net.tcpConnectToAddress(addr0);
-            defer socket.close();
+        fn clientFn(
+            alice_bob_addr: net.Address,
+            bob_charlie_addr: net.Address,
+        ) !void {
+            var alice_bob_server = try alice_bob_addr.listen(.{});
+            defer alice_bob_server.deinit();
+
+            const alice_bob_stream = (try alice_bob_server.accept()).stream;
+            defer alice_bob_stream.close();
+
+            const bob_charlie_stream = try net.tcpConnectToAddress(bob_charlie_addr);
+            defer bob_charlie_stream.close();
 
             var reader_buf: [10]u8 = undefined;
             var writer_buf: [10]u8 = undefined;
+            var stream_reader = bob_charlie_stream.reader(&reader_buf);
+            var stream_writer = bob_charlie_stream.writer(&writer_buf);
 
-            var stream_reader = socket.reader(&reader_buf);
-            var stream_writer = socket.writer(&writer_buf);
+            var alice_reader_buf: [10]u8 = undefined;
+            var alice_writer_buf: [10]u8 = undefined;
+            var alice_stream_reader = alice_bob_stream.reader(&alice_reader_buf);
+            var alice_stream_writer = alice_bob_stream.writer(&alice_writer_buf);
 
             var bob_context: BobContext = undefined;
             bob_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
-
-            //
-
-            const alice_client = try net.tcpConnectToAddress(addr1);
-            defer alice_client.close();
-
-            var alice_reader_buf: [10]u8 = undefined;
-            var alice_writer_buf: [10]u8 = undefined;
-            var alice_stream_reader = alice_client.reader(&alice_reader_buf);
-            var alice_stream_writer = alice_client.writer(&alice_writer_buf);
 
             try Runner.runProtocol(
                 .bob,
@@ -304,28 +320,27 @@ pub fn main() !void {
         }
     };
 
-    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{ localhost0, localhost1 });
+    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{ alice_bob_address, bob_charlie_address });
     defer bob_thread.join();
 
-    //
-    var server = try localhost0.listen(.{});
-    defer server.deinit();
+    var bob_charlie_server = try bob_charlie_address.listen(.{});
+    defer bob_charlie_server.deinit();
 
-    var alice_client = try server.accept();
-    defer alice_client.stream.close();
+    const bob_charlie_stream = (try bob_charlie_server.accept()).stream;
+    defer bob_charlie_stream.close();
 
-    var bob_client = try server.accept();
-    defer bob_client.stream.close();
+    const charlie_alice_stream = try net.tcpConnectToAddress(charlie_alice_address);
+    defer charlie_alice_stream.close();
 
     var alice_reader_buf: [10]u8 = undefined;
     var alice_writer_buf: [10]u8 = undefined;
-    var alice_stream_reader = alice_client.stream.reader(&alice_reader_buf);
-    var alice_stream_writer = alice_client.stream.writer(&alice_writer_buf);
+    var alice_stream_reader = charlie_alice_stream.reader(&alice_reader_buf);
+    var alice_stream_writer = charlie_alice_stream.writer(&alice_writer_buf);
 
     var bob_reader_buf: [10]u8 = undefined;
     var bob_writer_buf: [10]u8 = undefined;
-    var bob_stream_reader = bob_client.stream.reader(&bob_reader_buf);
-    var bob_stream_writer = bob_client.stream.writer(&bob_writer_buf);
+    var bob_stream_reader = bob_charlie_stream.reader(&bob_reader_buf);
+    var bob_stream_writer = bob_charlie_stream.writer(&bob_writer_buf);
 
     var charlie_context: CharlieContext = undefined;
     charlie_context.counter = 0;
