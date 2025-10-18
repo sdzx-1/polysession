@@ -297,7 +297,9 @@ pub fn Runner(
                         if (midx) |idx| {
                             const result = try @field(mult_channel, @tagName(sender)).recv(state_id, State);
                             const fn_name = std.fmt.comptimePrint("preprocess_{d}", .{idx});
-                            try @field(State, fn_name)(ctx, result);
+                            if (@hasDecl(State, fn_name)) {
+                                try @field(State, fn_name)(ctx, result);
+                            }
 
                             switch (result) {
                                 inline else => |new_fsm_state_wit| {

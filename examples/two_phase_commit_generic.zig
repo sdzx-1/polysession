@@ -4,176 +4,6 @@ const Data = ps.Data;
 const StreamChannel = @import("channel.zig").StreamChannel;
 const net = std.net;
 
-pub fn main() !void {
-    var xorshiro256: std.Random.Xoshiro256 = undefined;
-    const ptr: *[4 * 64]u8 = @ptrCast(&xorshiro256.s);
-    std.crypto.random.bytes(ptr);
-    const random = xorshiro256.random();
-
-    const localhost0 = try net.Address.parseIp(
-        "127.0.0.1",
-        random.intRangeAtMost(u16, 10000, 1 << 15),
-    );
-
-    const localhost1 = try net.Address.parseIp(
-        "127.0.0.1",
-        random.intRangeAtMost(u16, 10000, 1 << 15),
-    );
-
-    const alice = struct {
-        fn clientFn(addr0: net.Address, addr1: net.Address) !void {
-            const socket = try net.tcpConnectToAddress(addr0);
-            defer socket.close();
-
-            var reader_buf: [10]u8 = undefined;
-            var writer_buf: [10]u8 = undefined;
-
-            var stream_reader = socket.reader(&reader_buf);
-            var stream_writer = socket.writer(&writer_buf);
-
-            var alice_context: AliceContext = undefined;
-            alice_context.counter = 0;
-            const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
-            std.crypto.random.bytes(fill_ptr);
-
-            //
-            var alice_server = try addr1.listen(.{});
-            defer alice_server.deinit();
-
-            var bob_client = try alice_server.accept();
-            defer bob_client.stream.close();
-
-            var bob_reader_buf: [10]u8 = undefined;
-            var bob_writer_buf: [10]u8 = undefined;
-
-            var bob_stream_reader = bob_client.stream.reader(&bob_reader_buf);
-            var bob_stream_writer = bob_client.stream.writer(&bob_writer_buf);
-
-            try Runner.runProtocol(
-                .alice,
-                .{
-                    .charlie = StreamChannel{
-                        .reader = stream_reader.interface(),
-                        .writer = &stream_writer.interface,
-                        .log = false,
-                    },
-
-                    .bob = StreamChannel{
-                        .reader = bob_stream_reader.interface(),
-                        .writer = &bob_stream_writer.interface,
-                        .log = false,
-                        .perfix = "bob  ",
-                    },
-                },
-                curr_id,
-                &alice_context,
-            );
-        }
-    };
-
-    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{ localhost0, localhost1 });
-    defer alice_thread.join();
-
-    const bob = struct {
-        fn clientFn(addr0: net.Address, addr1: net.Address) !void {
-            std.Thread.sleep(std.time.ns_per_ms * 100); //Let alice connect first
-            const socket = try net.tcpConnectToAddress(addr0);
-            defer socket.close();
-
-            var reader_buf: [10]u8 = undefined;
-            var writer_buf: [10]u8 = undefined;
-
-            var stream_reader = socket.reader(&reader_buf);
-            var stream_writer = socket.writer(&writer_buf);
-
-            var bob_context: BobContext = undefined;
-            bob_context.counter = 0;
-            const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
-            std.crypto.random.bytes(fill_ptr);
-
-            //
-
-            const alice_client = try net.tcpConnectToAddress(addr1);
-            defer alice_client.close();
-
-            var alice_reader_buf: [10]u8 = undefined;
-            var alice_writer_buf: [10]u8 = undefined;
-            var alice_stream_reader = alice_client.reader(&alice_reader_buf);
-            var alice_stream_writer = alice_client.writer(&alice_writer_buf);
-
-            try Runner.runProtocol(
-                .bob,
-                .{
-                    .charlie = StreamChannel{
-                        .reader = stream_reader.interface(),
-                        .writer = &stream_writer.interface,
-                        .log = false,
-                    },
-
-                    .alice = StreamChannel{
-                        .reader = alice_stream_reader.interface(),
-                        .writer = &alice_stream_writer.interface,
-                        .log = false,
-                        .perfix = "alice",
-                    },
-                },
-                curr_id,
-                &bob_context,
-            );
-        }
-    };
-
-    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{ localhost0, localhost1 });
-    defer bob_thread.join();
-
-    //
-    var server = try localhost0.listen(.{});
-    defer server.deinit();
-
-    var alice_client = try server.accept();
-    defer alice_client.stream.close();
-
-    var bob_client = try server.accept();
-    defer bob_client.stream.close();
-
-    var alice_reader_buf: [10]u8 = undefined;
-    var alice_writer_buf: [10]u8 = undefined;
-    var alice_stream_reader = alice_client.stream.reader(&alice_reader_buf);
-    var alice_stream_writer = alice_client.stream.writer(&alice_writer_buf);
-
-    var bob_reader_buf: [10]u8 = undefined;
-    var bob_writer_buf: [10]u8 = undefined;
-    var bob_stream_reader = bob_client.stream.reader(&bob_reader_buf);
-    var bob_stream_writer = bob_client.stream.writer(&bob_writer_buf);
-
-    var charlie_context: CharlieContext = undefined;
-    charlie_context.counter = 0;
-    charlie_context.times_2pc = 0;
-    const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
-    std.crypto.random.bytes(fill_ptr);
-
-    try Runner.runProtocol(
-        .charlie,
-        .{
-            .alice = StreamChannel{
-                .reader = alice_stream_reader.interface(),
-                .writer = &alice_stream_writer.interface,
-                .log = true,
-                .perfix = "alice",
-            },
-
-            .bob = StreamChannel{
-                .reader = bob_stream_reader.interface(),
-                .writer = &bob_stream_writer.interface,
-                .log = true,
-                .perfix = "bob  ",
-            },
-        },
-        curr_id,
-        &charlie_context,
-    );
-}
-
 const AllRole = enum { alice, bob, charlie };
 
 const AliceContext = struct {
@@ -355,4 +185,174 @@ pub fn mk2pc(
             };
         }
     };
+}
+
+pub fn main() !void {
+    var xorshiro256: std.Random.Xoshiro256 = undefined;
+    const ptr: *[4 * 64]u8 = @ptrCast(&xorshiro256.s);
+    std.crypto.random.bytes(ptr);
+    const random = xorshiro256.random();
+
+    const localhost0 = try net.Address.parseIp(
+        "127.0.0.1",
+        random.intRangeAtMost(u16, 10000, 1 << 15),
+    );
+
+    const localhost1 = try net.Address.parseIp(
+        "127.0.0.1",
+        random.intRangeAtMost(u16, 10000, 1 << 15),
+    );
+
+    const alice = struct {
+        fn clientFn(addr0: net.Address, addr1: net.Address) !void {
+            const socket = try net.tcpConnectToAddress(addr0);
+            defer socket.close();
+
+            var reader_buf: [10]u8 = undefined;
+            var writer_buf: [10]u8 = undefined;
+
+            var stream_reader = socket.reader(&reader_buf);
+            var stream_writer = socket.writer(&writer_buf);
+
+            var alice_context: AliceContext = undefined;
+            alice_context.counter = 0;
+            const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
+            std.crypto.random.bytes(fill_ptr);
+
+            //
+            var alice_server = try addr1.listen(.{});
+            defer alice_server.deinit();
+
+            var bob_client = try alice_server.accept();
+            defer bob_client.stream.close();
+
+            var bob_reader_buf: [10]u8 = undefined;
+            var bob_writer_buf: [10]u8 = undefined;
+
+            var bob_stream_reader = bob_client.stream.reader(&bob_reader_buf);
+            var bob_stream_writer = bob_client.stream.writer(&bob_writer_buf);
+
+            try Runner.runProtocol(
+                .alice,
+                .{
+                    .charlie = StreamChannel{
+                        .reader = stream_reader.interface(),
+                        .writer = &stream_writer.interface,
+                        .log = false,
+                    },
+
+                    .bob = StreamChannel{
+                        .reader = bob_stream_reader.interface(),
+                        .writer = &bob_stream_writer.interface,
+                        .log = false,
+                    },
+                },
+                curr_id,
+                &alice_context,
+            );
+        }
+    };
+
+    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{ localhost0, localhost1 });
+    defer alice_thread.join();
+
+    const bob = struct {
+        fn clientFn(addr0: net.Address, addr1: net.Address) !void {
+            std.Thread.sleep(std.time.ns_per_ms * 100); //Let alice connect first
+            const socket = try net.tcpConnectToAddress(addr0);
+            defer socket.close();
+
+            var reader_buf: [10]u8 = undefined;
+            var writer_buf: [10]u8 = undefined;
+
+            var stream_reader = socket.reader(&reader_buf);
+            var stream_writer = socket.writer(&writer_buf);
+
+            var bob_context: BobContext = undefined;
+            bob_context.counter = 0;
+            const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
+            std.crypto.random.bytes(fill_ptr);
+
+            //
+
+            const alice_client = try net.tcpConnectToAddress(addr1);
+            defer alice_client.close();
+
+            var alice_reader_buf: [10]u8 = undefined;
+            var alice_writer_buf: [10]u8 = undefined;
+            var alice_stream_reader = alice_client.reader(&alice_reader_buf);
+            var alice_stream_writer = alice_client.writer(&alice_writer_buf);
+
+            try Runner.runProtocol(
+                .bob,
+                .{
+                    .charlie = StreamChannel{
+                        .reader = stream_reader.interface(),
+                        .writer = &stream_writer.interface,
+                        .log = false,
+                    },
+
+                    .alice = StreamChannel{
+                        .reader = alice_stream_reader.interface(),
+                        .writer = &alice_stream_writer.interface,
+                        .log = false,
+                    },
+                },
+                curr_id,
+                &bob_context,
+            );
+        }
+    };
+
+    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{ localhost0, localhost1 });
+    defer bob_thread.join();
+
+    //
+    var server = try localhost0.listen(.{});
+    defer server.deinit();
+
+    var alice_client = try server.accept();
+    defer alice_client.stream.close();
+
+    var bob_client = try server.accept();
+    defer bob_client.stream.close();
+
+    var alice_reader_buf: [10]u8 = undefined;
+    var alice_writer_buf: [10]u8 = undefined;
+    var alice_stream_reader = alice_client.stream.reader(&alice_reader_buf);
+    var alice_stream_writer = alice_client.stream.writer(&alice_writer_buf);
+
+    var bob_reader_buf: [10]u8 = undefined;
+    var bob_writer_buf: [10]u8 = undefined;
+    var bob_stream_reader = bob_client.stream.reader(&bob_reader_buf);
+    var bob_stream_writer = bob_client.stream.writer(&bob_writer_buf);
+
+    var charlie_context: CharlieContext = undefined;
+    charlie_context.counter = 0;
+    charlie_context.times_2pc = 0;
+    const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
+    std.crypto.random.bytes(fill_ptr);
+
+    try Runner.runProtocol(
+        .charlie,
+        .{
+            .alice = StreamChannel{
+                .reader = alice_stream_reader.interface(),
+                .writer = &alice_stream_writer.interface,
+                .log = true,
+                .master = "charlie",
+                .other = "alice",
+            },
+
+            .bob = StreamChannel{
+                .reader = bob_stream_reader.interface(),
+                .writer = &bob_stream_writer.interface,
+                .log = true,
+                .master = "charlie",
+                .other = "bob  ",
+            },
+        },
+        curr_id,
+        &charlie_context,
+    );
 }
