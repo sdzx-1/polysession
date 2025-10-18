@@ -32,10 +32,11 @@ pub fn build(b: *std.Build) void {
                 },
             }),
         });
-
-        b.installArtifact(exe);
-
+        
         const run_step = b.step(info.name, "Run the " ++ info.name);
+
+        const install_artifact = b.addInstallArtifact(exe, .{});
+        run_step.dependOn(&install_artifact.step);
 
         const run_cmd = b.addRunArtifact(exe);
         run_step.dependOn(&run_cmd.step);
