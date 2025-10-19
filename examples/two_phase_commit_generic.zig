@@ -58,7 +58,7 @@ pub const Random2pc = union(enum) {
     pub fn process(ctx: *SelectorContext) !@This() {
         ctx.times_2pc += 1;
         std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
-        if (ctx.times_2pc > 10) {
+        if (ctx.times_2pc > 100) {
             return .{ .exit = .{ .data = {} } };
         }
 

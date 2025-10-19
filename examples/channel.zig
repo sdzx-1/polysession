@@ -97,6 +97,7 @@ pub const Mvar = struct {
             .{ master, other, val },
         );
         var writer = std.Io.Writer.fixed(self.buff);
+        std.Thread.sleep(std.time.ns_per_ms * 2);
         try Codec.encode(&writer, state_id, val);
         self.size = writer.buffered().len;
 
