@@ -28,12 +28,16 @@ pub const MvarChannel = struct {
     mvar_a: *Mvar,
     mvar_b: *Mvar,
 
+    log: bool = false,
+    master: []const u8 = &.{},
+    other: []const u8 = &.{},
+
     pub fn recv(self: @This(), state_id: anytype, T: type) !T {
-        return try self.mvar_a.recv(state_id, T);
+        return try self.mvar_a.recv(state_id, T, self.log, self.master, self.other);
     }
 
     pub fn send(self: @This(), state_id: anytype, val: anytype) !void {
-        try self.mvar_b.send(state_id, val);
+        try self.mvar_b.send(state_id, val, self.log, self.master, self.other);
     }
 };
 
@@ -43,11 +47,18 @@ pub const Mvar = struct {
 
     state: MvarState = .empty,
     buff: []u8,
-    size: usize,
+    size: usize = 0,
 
     pub const MvarState = enum { full, empty };
 
-    pub fn recv(self: *@This(), state_id: anytype, T: type) !T {
+    pub fn recv(
+        self: *@This(),
+        state_id: anytype,
+        T: type,
+        log: bool,
+        master: []const u8,
+        other: []const u8,
+    ) !T {
         self.mutex.lock();
 
         while (self.state == .empty) {
@@ -56,6 +67,10 @@ pub const Mvar = struct {
 
         var reader = std.Io.Reader.fixed(self.buff);
         const val = try Codec.decode(&reader, state_id, T);
+        if (log) std.debug.print(
+            "{s} recv form {s}: {any}\n",
+            .{ master, other, val },
+        );
 
         self.state = .empty;
         self.mutex.unlock();
@@ -63,13 +78,24 @@ pub const Mvar = struct {
         return val;
     }
 
-    pub fn send(self: *@This(), state_id: anytype, val: anytype) !void {
+    pub fn send(
+        self: *@This(),
+        state_id: anytype,
+        val: anytype,
+        log: bool,
+        master: []const u8,
+        other: []const u8,
+    ) !void {
         self.mutex.lock();
 
         while (self.state == .full) {
             self.cond.wait(&self.mutex);
         }
 
+        if (log) std.debug.print(
+            "{s} send to   {s}: {any}\n",
+            .{ master, other, val },
+        );
         var writer = std.Io.Writer.fixed(self.buff);
         try Codec.encode(&writer, state_id, val);
         self.size = writer.buffered().len;

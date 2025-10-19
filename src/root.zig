@@ -10,10 +10,21 @@ pub fn ProtocolInfo(Name_: []const u8, Role_: type, context_: anytype) type {
     return struct {
         sender: Role_,
         receiver: []const Role_,
+        other_roles: ?[]const Role_ = null,
+        terminal_FsmState: ?type = null,
 
         pub const Name = Name_;
         pub const Role = Role_;
         pub const context = context_;
+
+        pub fn role_in_other_roles(self: @This(), comptime role: Role_) bool {
+            for (self.other_roles.?) |r| {
+                if (role == r) {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         pub fn RoleCtx(_: @This(), r: Role_) type {
             return @field(context_, @tagName(r));
@@ -307,6 +318,11 @@ pub fn Runner(
                                     continue :sw comptime idFromState(NewData.FsmState);
                                 },
                             }
+                        } else if (comptime State.info.other_roles != null and
+                            State.info.terminal_FsmState != null and
+                            State.info.role_in_other_roles(curr_role))
+                        {
+                            continue :sw comptime idFromState(State.info.terminal_FsmState.?);
                         } else {
                             switch (@typeInfo(State)) {
                                 .@"union" => |U| {

@@ -1,10 +1,13 @@
 const std = @import("std");
 const ps = @import("polysession");
 const Data = ps.Data;
-const StreamChannel = @import("channel.zig").StreamChannel;
+const channel = @import("channel.zig");
+const StreamChannel = channel.StreamChannel;
 const net = std.net;
+const Mvar = channel.Mvar;
+const MvarChannel = channel.MvarChannel;
 
-const AllRole = enum { alice, bob, charlie };
+const AllRole = enum { selector, alice, bob, charlie };
 
 const AliceContext = struct {
     counter: u32,
@@ -19,13 +22,17 @@ const BobContext = struct {
 const CharlieContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
-    times_2pc: u32,
 };
 
+const SelectorContext = struct {
+    xoshiro256: std.Random.Xoshiro256,
+    times_2pc: u32,
+};
 const Context = struct {
     alice: type = AliceContext,
     bob: type = BobContext,
     charlie: type = CharlieContext,
+    selector: type = SelectorContext,
 };
 
 // pub const EnterFsmState = CAB.Start(ABC.Start(BAC.Start(ps.Exit)));
@@ -34,23 +41,21 @@ pub const EnterFsmState = Random2pc;
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);
 
-const CAB = mk2pc(AllRole, .charlie, .alice, .bob, Context{});
-const ABC = mk2pc(AllRole, .alice, .bob, .charlie, Context{});
-const BAC = mk2pc(AllRole, .bob, .alice, .charlie, Context{});
-
 //Randomly select a 2pc protocol
 pub const Random2pc = union(enum) {
-    charlie_as_coordinator: Data(void, CAB.Start(@This())),
-    alice_as_coordinator: Data(void, ABC.Start(@This())),
-    bob_as_coordinator: Data(void, BAC.Start(@This())),
+    // zig fmt: off
+    charlie_as_coordinator: Data(void, mk2pc(AllRole, .charlie, .alice, .bob, Context{}, &.{.selector}, @This()).Start),
+    alice_as_coordinator  : Data(void, mk2pc(AllRole, .alice, .bob, .charlie, Context{}, &.{.selector}, @This()).Start),
+    bob_as_coordinator    : Data(void, mk2pc(AllRole, .bob, .alice, .charlie, Context{}, &.{.selector}, @This()).Start),
     exit: Data(void, ps.Exit),
+    // zig fmt: on
 
     pub const info: ps.ProtocolInfo("random_2pc", AllRole, Context{}) = .{
-        .sender = .charlie,
-        .receiver = &.{ .alice, .bob },
+        .sender = .selector,
+        .receiver = &.{ .charlie, .alice, .bob },
     };
 
-    pub fn process(ctx: *CharlieContext) !@This() {
+    pub fn process(ctx: *SelectorContext) !@This() {
         ctx.times_2pc += 1;
         std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
         if (ctx.times_2pc > 10) {
@@ -66,16 +71,6 @@ pub const Random2pc = union(enum) {
             else => unreachable,
         }
     }
-
-    pub fn preprocess_0(ctx: *AliceContext, msg: @This()) !void {
-        _ = ctx;
-        _ = msg;
-    }
-
-    pub fn preprocess_1(ctx: *BobContext, msg: @This()) !void {
-        _ = ctx;
-        _ = msg;
-    }
 };
 
 //
@@ -85,162 +80,117 @@ pub fn mk2pc(
     alice: Role,
     bob: Role,
     context: anytype,
+    others: []const Role,
+    NextFsmState: type,
 ) type {
     return struct {
         fn two_pc(sender: Role, receiver: []const Role) ps.ProtocolInfo("2pc_generic", Role, context) {
-            return .{ .sender = sender, .receiver = receiver };
-        }
-
-        pub fn Start(NextFsmState: type) type {
-            return union(enum) {
-                begin: Data(void, AliceResp(NextFsmState)),
-
-                pub const info = two_pc(coordinator, &.{ alice, bob });
-
-                pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
-                    _ = ctx;
-                    return .{ .begin = .{ .data = {} } };
-                }
-
-                pub fn preprocess_0(ctx: *info.RoleCtx(alice), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
-
-                pub fn preprocess_1(ctx: *info.RoleCtx(bob), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
+            return .{
+                .sender = sender,
+                .receiver = receiver,
+                .other_roles = others,
+                .terminal_FsmState = NotifyOther,
             };
         }
+        pub const NotifyOther = union(enum) {
+            notify: Data(void, NextFsmState),
 
-        pub fn AliceResp(NextFsmState: type) type {
-            return union(enum) {
-                resp: Data(bool, BobResp(NextFsmState)),
+            pub const info = two_pc(coordinator, others);
 
-                pub const info = two_pc(alice, &.{coordinator});
+            pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
+                _ = ctx;
+                return .{ .notify = .{ .data = {} } };
+            }
+        };
 
-                pub fn process(ctx: *info.RoleCtx(alice)) !@This() {
-                    const random: std.Random = ctx.xoshiro256.random();
-                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
-                    return .{ .resp = .{ .data = res } };
+        pub const Start = union(enum) {
+            begin: Data(void, AliceResp),
+
+            pub const info = two_pc(coordinator, &.{ alice, bob });
+
+            pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
+                ctx.counter = 0;
+                return .{ .begin = .{ .data = {} } };
+            }
+        };
+
+        pub const AliceResp = union(enum) {
+            resp: Data(bool, BobResp),
+
+            pub const info = two_pc(alice, &.{coordinator});
+
+            pub fn process(ctx: *info.RoleCtx(alice)) !@This() {
+                const random: std.Random = ctx.xoshiro256.random();
+                const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
+                return .{ .resp = .{ .data = res } };
+            }
+
+            pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
+                switch (msg) {
+                    .resp => |val| {
+                        if (val.data) ctx.counter += 1;
+                    },
                 }
+            }
+        };
 
-                pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
-                    switch (msg) {
-                        .resp => |val| {
-                            if (val.data) ctx.counter += 1;
-                        },
-                    }
+        pub const BobResp = union(enum) {
+            resp: Data(bool, Check),
+
+            pub const info = two_pc(bob, &.{coordinator});
+
+            pub fn process(ctx: *info.RoleCtx(bob)) !@This() {
+                const random: std.Random = ctx.xoshiro256.random();
+                const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
+                return .{ .resp = .{ .data = res } };
+            }
+
+            pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
+                switch (msg) {
+                    .resp => |val| {
+                        if (val.data) ctx.counter += 1;
+                    },
                 }
-            };
-        }
-        pub fn BobResp(NextFsmState: type) type {
-            return union(enum) {
-                resp: Data(bool, Check(NextFsmState)),
+            }
+        };
 
-                pub const info = two_pc(bob, &.{coordinator});
-
-                pub fn process(ctx: *info.RoleCtx(bob)) !@This() {
-                    const random: std.Random = ctx.xoshiro256.random();
-                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
-                    return .{ .resp = .{ .data = res } };
-                }
-
-                pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
-                    switch (msg) {
-                        .resp => |val| {
-                            if (val.data) ctx.counter += 1;
-                        },
-                    }
-                }
-            };
-        }
-
-        pub fn Check(NextFsmState: type) type {
-            return union(enum) {
-                succcessed: Data(void, NextFsmState),
-                failed_retry: Data(void, Start(NextFsmState)),
+        pub const Check =
+            union(enum) {
+                succcessed: Data(void, NotifyOther),
+                failed_retry: Data(void, Start),
 
                 pub const info = two_pc(coordinator, &.{ alice, bob });
 
                 pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
                     if (ctx.counter == 2) {
-                        ctx.counter = 0;
                         return .{ .succcessed = .{ .data = {} } };
                     }
-                    ctx.counter = 0;
                     return .{ .failed_retry = .{ .data = {} } };
                 }
-
-                pub fn preprocess_0(ctx: *info.RoleCtx(alice), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
-
-                pub fn preprocess_1(ctx: *info.RoleCtx(bob), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
             };
-        }
     };
 }
 
 pub fn main() !void {
-    var xorshiro256: std.Random.Xoshiro256 = undefined;
-    const ptr: *[4 * 64]u8 = @ptrCast(&xorshiro256.s);
-    std.crypto.random.bytes(ptr);
-    const random = xorshiro256.random();
+    var gpa_instance = std.heap.DebugAllocator(.{}).init;
+    const gpa = gpa_instance.allocator();
 
-    const start_address = random.intRangeAtMost(u16, 10000, (1 << 15) - 2);
+    var mvar_selector: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
+    var mvar_alice: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
+    var mvar_bob: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
+    var mvar_charlie: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
 
-    const alice_bob_address = try net.Address.parseIp(
-        "127.0.0.1",
-        start_address,
-    );
+    const AllMvars = struct { selector: *Mvar, alice: *Mvar, bob: *Mvar, charlie: *Mvar };
 
-    const bob_charlie_address = try net.Address.parseIp(
-        "127.0.0.1",
-        start_address + 1,
-    );
-
-    const charlie_alice_address = try net.Address.parseIp(
-        "127.0.0.1",
-        start_address + 2,
-    );
-
-    // waiting for connection: (bob, charlie)
-    // connection:             alice -> bob
-    // waiting for connection: (alice, charlie)
-    // connection:             bob -> charlie
-    // waiting for connection: (alice)
-    // connection:             charlie -> alice
+    const all_mvars: AllMvars = .{
+        .selector = &mvar_selector,
+        .alice = &mvar_alice,
+        .bob = &mvar_bob,
+        .charlie = &mvar_charlie,
+    };
 
     const alice = struct {
-        fn clientFn(
-            alice_bob_addr: net.Address,
-            charlie_alice_addr: net.Address,
-        ) !void {
-            const alice_bob_stream = try net.tcpConnectToAddress(alice_bob_addr);
-            defer alice_bob_stream.close();
-
-            var charlie_alice_server = try charlie_alice_addr.listen(.{});
-            defer charlie_alice_server.deinit();
-
-            const charlie_alice_stream = (try charlie_alice_server.accept()).stream;
-            defer charlie_alice_stream.close();
-
-            var reader_buf: [10]u8 = undefined;
-            var writer_buf: [10]u8 = undefined;
-            var stream_reader = charlie_alice_stream.reader(&reader_buf);
-            var stream_writer = charlie_alice_stream.writer(&writer_buf);
-
-            var bob_reader_buf: [10]u8 = undefined;
-            var bob_writer_buf: [10]u8 = undefined;
-            var bob_stream_reader = alice_bob_stream.reader(&bob_reader_buf);
-            var bob_stream_writer = alice_bob_stream.writer(&bob_writer_buf);
-
+        fn clientFn(all_mvars_: AllMvars) !void {
             var alice_context: AliceContext = undefined;
             alice_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
@@ -249,17 +199,12 @@ pub fn main() !void {
             try Runner.runProtocol(
                 .alice,
                 .{
-                    .charlie = StreamChannel{
-                        .reader = stream_reader.interface(),
-                        .writer = &stream_writer.interface,
-                        .log = false,
-                    },
-
-                    .bob = StreamChannel{
-                        .reader = bob_stream_reader.interface(),
-                        .writer = &bob_stream_writer.interface,
-                        .log = false,
-                    },
+                    // zig fmt: off
+                    .selector = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.selector },
+                    .alice    = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.alice },
+                    .bob      = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.bob },
+                    .charlie  = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.charlie },
+                    // zig fmt: on
                 },
                 curr_id,
                 &alice_context,
@@ -267,33 +212,11 @@ pub fn main() !void {
         }
     };
 
-    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{ alice_bob_address, charlie_alice_address });
+    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{all_mvars});
     defer alice_thread.join();
 
     const bob = struct {
-        fn clientFn(
-            alice_bob_addr: net.Address,
-            bob_charlie_addr: net.Address,
-        ) !void {
-            var alice_bob_server = try alice_bob_addr.listen(.{});
-            defer alice_bob_server.deinit();
-
-            const alice_bob_stream = (try alice_bob_server.accept()).stream;
-            defer alice_bob_stream.close();
-
-            const bob_charlie_stream = try net.tcpConnectToAddress(bob_charlie_addr);
-            defer bob_charlie_stream.close();
-
-            var reader_buf: [10]u8 = undefined;
-            var writer_buf: [10]u8 = undefined;
-            var stream_reader = bob_charlie_stream.reader(&reader_buf);
-            var stream_writer = bob_charlie_stream.writer(&writer_buf);
-
-            var alice_reader_buf: [10]u8 = undefined;
-            var alice_writer_buf: [10]u8 = undefined;
-            var alice_stream_reader = alice_bob_stream.reader(&alice_reader_buf);
-            var alice_stream_writer = alice_bob_stream.writer(&alice_writer_buf);
-
+        fn clientFn(all_mvars_: AllMvars) !void {
             var bob_context: BobContext = undefined;
             bob_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
@@ -302,17 +225,13 @@ pub fn main() !void {
             try Runner.runProtocol(
                 .bob,
                 .{
-                    .charlie = StreamChannel{
-                        .reader = stream_reader.interface(),
-                        .writer = &stream_writer.interface,
-                        .log = false,
-                    },
 
-                    .alice = StreamChannel{
-                        .reader = alice_stream_reader.interface(),
-                        .writer = &alice_stream_writer.interface,
-                        .log = false,
-                    },
+                    // zig fmt: off
+                    .selector = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.selector },
+                    .alice    = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.alice },
+                    .bob      = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.bob },
+                    .charlie  = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.charlie },
+                    // zig fmt: on
                 },
                 curr_id,
                 &bob_context,
@@ -320,51 +239,92 @@ pub fn main() !void {
         }
     };
 
-    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{ alice_bob_address, bob_charlie_address });
+    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{all_mvars});
     defer bob_thread.join();
 
-    var bob_charlie_server = try bob_charlie_address.listen(.{});
-    defer bob_charlie_server.deinit();
+    const selector = struct {
+        fn clientFn(all_mvars_: AllMvars) !void {
+            var selector_context: SelectorContext = undefined;
+            const fill_ptr: []u8 = @ptrCast(&selector_context.xoshiro256.s);
+            std.crypto.random.bytes(fill_ptr);
+            selector_context.times_2pc = 0;
 
-    const bob_charlie_stream = (try bob_charlie_server.accept()).stream;
-    defer bob_charlie_stream.close();
+            try Runner.runProtocol(
+                .selector,
+                .{
+                    .selector = MvarChannel{
+                        .mvar_a = all_mvars_.selector,
+                        .mvar_b = all_mvars_.selector,
+                        .master = "selector",
+                        .other = "selector",
+                        .log = false,
+                    },
+                    .alice = MvarChannel{
+                        .mvar_a = all_mvars_.selector,
+                        .mvar_b = all_mvars_.alice,
+                        .log = false,
+                        .master = "selector",
+                        .other = "alice",
+                    },
+                    .bob = MvarChannel{
+                        .mvar_a = all_mvars_.selector,
+                        .mvar_b = all_mvars_.bob,
+                        .master = "selector",
+                        .other = "bob",
+                        .log = false,
+                    },
+                    .charlie = MvarChannel{
+                        .mvar_a = all_mvars_.selector,
+                        .mvar_b = all_mvars_.charlie,
+                        .master = "selector",
+                        .other = "charlie",
+                        .log = false,
+                    },
+                },
+                curr_id,
+                &selector_context,
+            );
+        }
+    };
 
-    const charlie_alice_stream = try net.tcpConnectToAddress(charlie_alice_address);
-    defer charlie_alice_stream.close();
-
-    var alice_reader_buf: [10]u8 = undefined;
-    var alice_writer_buf: [10]u8 = undefined;
-    var alice_stream_reader = charlie_alice_stream.reader(&alice_reader_buf);
-    var alice_stream_writer = charlie_alice_stream.writer(&alice_writer_buf);
-
-    var bob_reader_buf: [10]u8 = undefined;
-    var bob_writer_buf: [10]u8 = undefined;
-    var bob_stream_reader = bob_charlie_stream.reader(&bob_reader_buf);
-    var bob_stream_writer = bob_charlie_stream.writer(&bob_writer_buf);
+    const selector_thread = try std.Thread.spawn(.{}, selector.clientFn, .{all_mvars});
+    defer selector_thread.join();
 
     var charlie_context: CharlieContext = undefined;
     charlie_context.counter = 0;
-    charlie_context.times_2pc = 0;
     const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
     std.crypto.random.bytes(fill_ptr);
 
     try Runner.runProtocol(
         .charlie,
         .{
-            .alice = StreamChannel{
-                .reader = alice_stream_reader.interface(),
-                .writer = &alice_stream_writer.interface,
+            .selector = MvarChannel{
+                .mvar_a = all_mvars.charlie,
+                .mvar_b = all_mvars.selector,
+                .master = "charlie",
+                .other = "selector",
+                .log = true,
+            },
+            .alice = MvarChannel{
+                .mvar_a = all_mvars.charlie,
+                .mvar_b = all_mvars.alice,
                 .log = true,
                 .master = "charlie",
                 .other = "alice",
             },
-
-            .bob = StreamChannel{
-                .reader = bob_stream_reader.interface(),
-                .writer = &bob_stream_writer.interface,
-                .log = true,
+            .bob = MvarChannel{
+                .mvar_a = all_mvars.charlie,
+                .mvar_b = all_mvars.bob,
                 .master = "charlie",
-                .other = "bob  ",
+                .other = "bob",
+                .log = true,
+            },
+            .charlie = MvarChannel{
+                .mvar_a = all_mvars.charlie,
+                .mvar_b = all_mvars.charlie,
+                .master = "charlie",
+                .other = "charlie",
+                .log = true,
             },
         },
         curr_id,
