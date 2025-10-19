@@ -32,6 +32,16 @@ pub const MvarChannel = struct {
     master: []const u8 = &.{},
     other: []const u8 = &.{},
 
+    pub fn flip(self: @This()) MvarChannel {
+        return .{
+            .mvar_a = self.mvar_b,
+            .mvar_b = self.mvar_a,
+            .log = self.log,
+            .master = self.other,
+            .other = self.master,
+        };
+    }
+
     pub fn recv(self: @This(), state_id: anytype, T: type) !T {
         return try self.mvar_a.recv(state_id, T, self.log, self.master, self.other);
     }
@@ -50,6 +60,20 @@ pub const Mvar = struct {
     size: usize = 0,
 
     pub const MvarState = enum { full, empty };
+
+    pub fn init(gpa: std.mem.Allocator, len: usize) !*Mvar {
+        const ref = try gpa.create(Mvar);
+        const buff = try gpa.alloc(u8, len);
+        ref.* = .{
+            .mutex = .{},
+            .cond = .{},
+            .state = .empty,
+            .buff = buff,
+            .size = 0,
+        };
+
+        return ref;
+    }
 
     pub fn recv(
         self: *@This(),
@@ -97,7 +121,6 @@ pub const Mvar = struct {
             .{ master, other, val },
         );
         var writer = std.Io.Writer.fixed(self.buff);
-        std.Thread.sleep(std.time.ns_per_ms * 2);
         try Codec.encode(&writer, state_id, val);
         self.size = writer.buffered().len;
 

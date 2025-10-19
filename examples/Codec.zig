@@ -39,7 +39,10 @@ pub fn encode(writer: *std.Io.Writer, state_id: anytype, val: anytype) !void {
 pub fn decode(reader: *std.Io.Reader, state_id: anytype, T: type) !T {
     const id: u8 = @intFromEnum(state_id);
     const rid = try reader.takeByte();
-    if (id != rid) return error.IncorrectStatusReceived;
+    if (id != rid) {
+        std.debug.print("id: {d}, rid: {d}\n", .{ id, rid });
+        return error.IncorrectStatusReceived;
+    }
     const recv_tag_num = try reader.takeByte();
     const tag: std.meta.Tag(T) = @enumFromInt(recv_tag_num);
     switch (tag) {

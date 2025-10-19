@@ -27,6 +27,7 @@ const CharlieContext = struct {
 const SelectorContext = struct {
     xoshiro256: std.Random.Xoshiro256,
     times_2pc: u32,
+    counter_arr: [3]u32,
 };
 const Context = struct {
     alice: type = AliceContext,
@@ -35,7 +36,6 @@ const Context = struct {
     selector: type = SelectorContext,
 };
 
-// pub const EnterFsmState = CAB.Start(ABC.Start(BAC.Start(ps.Exit)));
 pub const EnterFsmState = Random2pc;
 
 pub const Runner = ps.Runner(EnterFsmState);
@@ -57,13 +57,25 @@ pub const Random2pc = union(enum) {
 
     pub fn process(ctx: *SelectorContext) !@This() {
         ctx.times_2pc += 1;
-        std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
-        if (ctx.times_2pc > 100) {
+        if (ctx.times_2pc % 1000 == 0) {
+            std.debug.print(
+                "times_2pc: {d}, charlie {d}, alice {d}, bob {d}\n",
+                .{
+                    ctx.times_2pc,
+                    ctx.counter_arr[0],
+                    ctx.counter_arr[1],
+                    ctx.counter_arr[2],
+                },
+            );
+        }
+
+        if (ctx.times_2pc >= 100_000) {
             return .{ .exit = .{ .data = {} } };
         }
 
         const random: std.Random = ctx.xoshiro256.random();
         const res = random.intRangeAtMost(u8, 0, 2);
+        ctx.counter_arr[@as(usize, @intCast(res))] += 1;
         switch (res) {
             0 => return .{ .charlie_as_coordinator = .{ .data = {} } },
             1 => return .{ .alice_as_coordinator = .{ .data = {} } },
@@ -175,22 +187,33 @@ pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
 
-    var mvar_selector: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
-    var mvar_alice: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
-    var mvar_bob: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
-    var mvar_charlie: Mvar = .{ .buff = try gpa.alloc(u8, 10) };
+    const selector_alice: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
+    const selector_bob: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
+    const selector_charlie: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
+    const charlie_alice: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
+    const charlie_bob: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
+    const bob_alice: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
 
-    const AllMvars = struct { selector: *Mvar, alice: *Mvar, bob: *Mvar, charlie: *Mvar };
+    const AllChannel = struct {
+        selector_alice: MvarChannel,
+        selector_bob: MvarChannel,
+        selector_charlie: MvarChannel,
+        charlie_alice: MvarChannel,
+        charlie_bob: MvarChannel,
+        bob_alice: MvarChannel,
+    };
 
-    const all_mvars: AllMvars = .{
-        .selector = &mvar_selector,
-        .alice = &mvar_alice,
-        .bob = &mvar_bob,
-        .charlie = &mvar_charlie,
+    const all_channel: AllChannel = .{
+        .selector_alice = selector_alice,
+        .selector_bob = selector_bob,
+        .selector_charlie = selector_charlie,
+        .charlie_alice = charlie_alice,
+        .charlie_bob = charlie_bob,
+        .bob_alice = bob_alice,
     };
 
     const alice = struct {
-        fn clientFn(all_mvars_: AllMvars) !void {
+        fn clientFn(all_channel_: AllChannel) !void {
             var alice_context: AliceContext = undefined;
             alice_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
@@ -199,12 +222,9 @@ pub fn main() !void {
             try Runner.runProtocol(
                 .alice,
                 .{
-                    // zig fmt: off
-                    .selector = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.selector },
-                    .alice    = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.alice },
-                    .bob      = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.bob },
-                    .charlie  = MvarChannel{ .mvar_a = all_mvars_.alice, .mvar_b = all_mvars_.charlie },
-                    // zig fmt: on
+                    .selector = all_channel_.selector_alice.flip(),
+                    .bob = all_channel_.bob_alice.flip(),
+                    .charlie = all_channel_.charlie_alice.flip(),
                 },
                 curr_id,
                 &alice_context,
@@ -212,11 +232,11 @@ pub fn main() !void {
         }
     };
 
-    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{all_mvars});
+    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{all_channel});
     defer alice_thread.join();
 
     const bob = struct {
-        fn clientFn(all_mvars_: AllMvars) !void {
+        fn clientFn(all_channel_: AllChannel) !void {
             var bob_context: BobContext = undefined;
             bob_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
@@ -225,13 +245,9 @@ pub fn main() !void {
             try Runner.runProtocol(
                 .bob,
                 .{
-
-                    // zig fmt: off
-                    .selector = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.selector },
-                    .alice    = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.alice },
-                    .bob      = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.bob },
-                    .charlie  = MvarChannel{ .mvar_a = all_mvars_.bob, .mvar_b = all_mvars_.charlie },
-                    // zig fmt: on
+                    .selector = all_channel_.selector_bob.flip(),
+                    .alice = all_channel_.bob_alice,
+                    .charlie = all_channel_.charlie_bob.flip(),
                 },
                 curr_id,
                 &bob_context,
@@ -239,12 +255,13 @@ pub fn main() !void {
         }
     };
 
-    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{all_mvars});
+    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{all_channel});
     defer bob_thread.join();
 
     const selector = struct {
-        fn clientFn(all_mvars_: AllMvars) !void {
+        fn clientFn(all_channel_: AllChannel) !void {
             var selector_context: SelectorContext = undefined;
+            selector_context.counter_arr = @splat(0);
             const fill_ptr: []u8 = @ptrCast(&selector_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
             selector_context.times_2pc = 0;
@@ -252,34 +269,9 @@ pub fn main() !void {
             try Runner.runProtocol(
                 .selector,
                 .{
-                    .selector = MvarChannel{
-                        .mvar_a = all_mvars_.selector,
-                        .mvar_b = all_mvars_.selector,
-                        .master = "selector",
-                        .other = "selector",
-                        .log = false,
-                    },
-                    .alice = MvarChannel{
-                        .mvar_a = all_mvars_.selector,
-                        .mvar_b = all_mvars_.alice,
-                        .log = false,
-                        .master = "selector",
-                        .other = "alice",
-                    },
-                    .bob = MvarChannel{
-                        .mvar_a = all_mvars_.selector,
-                        .mvar_b = all_mvars_.bob,
-                        .master = "selector",
-                        .other = "bob",
-                        .log = false,
-                    },
-                    .charlie = MvarChannel{
-                        .mvar_a = all_mvars_.selector,
-                        .mvar_b = all_mvars_.charlie,
-                        .master = "selector",
-                        .other = "charlie",
-                        .log = false,
-                    },
+                    .alice = all_channel_.selector_alice,
+                    .bob = all_channel_.selector_bob,
+                    .charlie = all_channel_.selector_charlie,
                 },
                 curr_id,
                 &selector_context,
@@ -287,7 +279,7 @@ pub fn main() !void {
         }
     };
 
-    const selector_thread = try std.Thread.spawn(.{}, selector.clientFn, .{all_mvars});
+    const selector_thread = try std.Thread.spawn(.{}, selector.clientFn, .{all_channel});
     defer selector_thread.join();
 
     var charlie_context: CharlieContext = undefined;
@@ -298,34 +290,9 @@ pub fn main() !void {
     try Runner.runProtocol(
         .charlie,
         .{
-            .selector = MvarChannel{
-                .mvar_a = all_mvars.charlie,
-                .mvar_b = all_mvars.selector,
-                .master = "charlie",
-                .other = "selector",
-                .log = true,
-            },
-            .alice = MvarChannel{
-                .mvar_a = all_mvars.charlie,
-                .mvar_b = all_mvars.alice,
-                .log = true,
-                .master = "charlie",
-                .other = "alice",
-            },
-            .bob = MvarChannel{
-                .mvar_a = all_mvars.charlie,
-                .mvar_b = all_mvars.bob,
-                .master = "charlie",
-                .other = "bob",
-                .log = true,
-            },
-            .charlie = MvarChannel{
-                .mvar_a = all_mvars.charlie,
-                .mvar_b = all_mvars.charlie,
-                .master = "charlie",
-                .other = "charlie",
-                .log = true,
-            },
+            .selector = all_channel.selector_charlie.flip(),
+            .alice = all_channel.charlie_alice,
+            .bob = all_channel.charlie_bob,
         },
         curr_id,
         &charlie_context,
