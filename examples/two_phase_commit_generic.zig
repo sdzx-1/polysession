@@ -57,19 +57,17 @@ pub const Random2pc = union(enum) {
 
     pub fn process(ctx: *SelectorContext) !@This() {
         ctx.times_2pc += 1;
-        if (ctx.times_2pc % 1000 == 0) {
-            std.debug.print(
-                "times_2pc: {d}, charlie {d}, alice {d}, bob {d}\n",
-                .{
-                    ctx.times_2pc,
-                    ctx.counter_arr[0],
-                    ctx.counter_arr[1],
-                    ctx.counter_arr[2],
-                },
-            );
-        }
+        std.debug.print(
+            "times_2pc: {d}, charlie {d}, alice {d}, bob {d}\n",
+            .{
+                ctx.times_2pc,
+                ctx.counter_arr[0],
+                ctx.counter_arr[1],
+                ctx.counter_arr[2],
+            },
+        );
 
-        if (ctx.times_2pc >= 100_000) {
+        if (ctx.times_2pc >= 10) {
             return .{ .exit = .{ .data = {} } };
         }
 
@@ -187,12 +185,42 @@ pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
 
-    const selector_alice: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
-    const selector_bob: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
-    const selector_charlie: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
-    const charlie_alice: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
-    const charlie_bob: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
-    const bob_alice: MvarChannel = .{ .mvar_a = try Mvar.init(gpa, 10), .mvar_b = try Mvar.init(gpa, 10), .log = false };
+    const selector_alice: MvarChannel = .{
+        .mvar_a = try Mvar.init(gpa, 10),
+        .mvar_b = try Mvar.init(gpa, 10),
+        .master = "selector",
+        .other = "alice",
+    };
+    const selector_bob: MvarChannel = .{
+        .mvar_a = try Mvar.init(gpa, 10),
+        .mvar_b = try Mvar.init(gpa, 10),
+        .master = "selector",
+        .other = "bob",
+    };
+    const selector_charlie: MvarChannel = .{
+        .mvar_a = try Mvar.init(gpa, 10),
+        .mvar_b = try Mvar.init(gpa, 10),
+        .master = "selector",
+        .other = "charlie",
+    };
+    const charlie_alice: MvarChannel = .{
+        .mvar_a = try Mvar.init(gpa, 10),
+        .mvar_b = try Mvar.init(gpa, 10),
+        .master = "charlie",
+        .other = "alice",
+    };
+    const charlie_bob: MvarChannel = .{
+        .mvar_a = try Mvar.init(gpa, 10),
+        .mvar_b = try Mvar.init(gpa, 10),
+        .master = "charlie",
+        .other = "bob",
+    };
+    const bob_alice: MvarChannel = .{
+        .mvar_a = try Mvar.init(gpa, 10),
+        .mvar_b = try Mvar.init(gpa, 10),
+        .master = "bob",
+        .other = "alice",
+    };
 
     const AllChannel = struct {
         selector_alice: MvarChannel,
@@ -290,9 +318,9 @@ pub fn main() !void {
     try Runner.runProtocol(
         .charlie,
         .{
-            .selector = all_channel.selector_charlie.flip(),
-            .alice = all_channel.charlie_alice,
-            .bob = all_channel.charlie_bob,
+            .selector = all_channel.selector_charlie.flip().enable_log(),
+            .alice = all_channel.charlie_alice.enable_log(),
+            .bob = all_channel.charlie_bob.enable_log(),
         },
         curr_id,
         &charlie_context,

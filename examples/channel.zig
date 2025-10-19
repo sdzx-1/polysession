@@ -42,6 +42,12 @@ pub const MvarChannel = struct {
         };
     }
 
+    pub fn enable_log(self: @This()) @This() {
+        var tmp = self;
+        tmp.log = true;
+        return tmp;
+    }
+
     pub fn recv(self: @This(), state_id: anytype, T: type) !T {
         return try self.mvar_a.recv(state_id, T, self.log, self.master, self.other);
     }
