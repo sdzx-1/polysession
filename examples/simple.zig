@@ -76,6 +76,7 @@ pub fn main() !void {
 
             try Runner.runProtocol(
                 .client,
+                true,
                 .{
                     .server = StreamChannel{
                         .reader = stream_reader.interface(),
@@ -120,6 +121,7 @@ pub fn main() !void {
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
         .server,
+        true,
         .{
             .client = StreamChannel{
                 .reader = stream_reader.interface(),

@@ -273,6 +273,7 @@ pub fn Runner(
 
         pub fn runProtocol(
             comptime curr_role: Role,
+            comptime static_channel_role: bool,
             mult_channel: anytype,
             curr_id: StateId,
             ctx: *FsmState.info.RoleCtx(curr_role),
@@ -289,7 +290,11 @@ pub fn Runner(
                     if (comptime curr_role == sender) {
                         const result = try State.process(ctx);
                         inline for (receiver) |rvr| {
-                            try @field(mult_channel, @tagName(rvr)).send(state_id, result);
+                            if (static_channel_role) {
+                                try @field(mult_channel, @tagName(rvr)).send(state_id, result);
+                            } else {
+                                try mult_channel.send(curr_role, rvr, state_id, result);
+                            }
                         }
                         switch (result) {
                             inline else => |new_fsm_state_wit| {
@@ -306,7 +311,13 @@ pub fn Runner(
                         };
 
                         if (midx) |idx| {
-                            const result = try @field(mult_channel, @tagName(sender)).recv(state_id, State);
+                            const result = blk_res: {
+                                if (static_channel_role) {
+                                    break :blk_res try @field(mult_channel, @tagName(sender)).recv(state_id, State);
+                                } else {
+                                    break :blk_res try mult_channel.recv(curr_role, sender, state_id, State);
+                                }
+                            };
                             const fn_name = std.fmt.comptimePrint("preprocess_{d}", .{idx});
                             if (@hasDecl(State, fn_name)) {
                                 try @field(State, fn_name)(ctx, result);

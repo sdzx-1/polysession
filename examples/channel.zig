@@ -135,3 +135,76 @@ pub const Mvar = struct {
         self.cond.signal();
     }
 };
+
+pub fn ConnectChannelMap(Role: type) type {
+    return struct {
+        hashmap: std.AutoArrayHashMapUnmanaged([2]u8, MvarChannel),
+
+        pub fn init() @This() {
+            return .{ .hashmap = .empty };
+        }
+
+        pub fn enable_log(self: @This(), role: Role) void {
+            self.set_log(role, true);
+        }
+
+        pub fn set_log(self: @This(), role: Role, val: bool) void {
+            var iter = self.hashmap.iterator();
+            while (iter.next()) |entry| {
+                if (entry.key_ptr.*[0] == @as(u8, @intFromEnum(role))) {
+                    entry.value_ptr.log = val;
+                }
+            }
+        }
+
+        pub fn generate_all_MvarChannel(
+            self: *@This(),
+            gpa: std.mem.Allocator,
+            comptime buff_size: usize,
+        ) !void {
+            const enum_fields = @typeInfo(Role).@"enum".fields;
+            var i: usize = 0;
+            while (i < enum_fields.len) : (i += 1) {
+                var j = i + 1;
+                while (j < enum_fields.len) : (j += 1) {
+                    const mvar_a = try Mvar.init(gpa, buff_size);
+                    const mvar_b = try Mvar.init(gpa, buff_size);
+
+                    try self.hashmap.put(
+                        gpa,
+                        .{ @as(u8, @intCast(i)), @as(u8, @intCast(j)) },
+                        .{
+                            .mvar_a = mvar_a,
+                            .mvar_b = mvar_b,
+                            .log = false,
+                            .master = @tagName(@as(Role, @enumFromInt(i))),
+                            .other = @tagName(@as(Role, @enumFromInt(j))),
+                        },
+                    );
+
+                    try self.hashmap.put(
+                        gpa,
+                        .{ @as(u8, @intCast(j)), @as(u8, @intCast(i)) },
+                        .{
+                            .mvar_a = mvar_b,
+                            .mvar_b = mvar_a,
+                            .log = false,
+                            .master = @tagName(@as(Role, @enumFromInt(j))),
+                            .other = @tagName(@as(Role, @enumFromInt(i))),
+                        },
+                    );
+                }
+            }
+        }
+
+        pub fn recv(self: @This(), curr_role: Role, other: Role, state_id: anytype, T: type) !T {
+            const mvar_channel = self.hashmap.get(.{ @intFromEnum(curr_role), @intFromEnum(other) }).?;
+            return try mvar_channel.recv(state_id, T);
+        }
+
+        pub fn send(self: @This(), curr_role: Role, other: Role, state_id: anytype, val: anytype) !void {
+            const mvar_channel = self.hashmap.get(.{ @intFromEnum(curr_role), @intFromEnum(other) }).?;
+            try mvar_channel.send(state_id, val);
+        }
+    };
+}

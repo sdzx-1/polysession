@@ -185,129 +185,49 @@ pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
 
-    const selector_alice: MvarChannel = .{
-        .mvar_a = try Mvar.init(gpa, 10),
-        .mvar_b = try Mvar.init(gpa, 10),
-        .master = "selector",
-        .other = "alice",
-    };
-    const selector_bob: MvarChannel = .{
-        .mvar_a = try Mvar.init(gpa, 10),
-        .mvar_b = try Mvar.init(gpa, 10),
-        .master = "selector",
-        .other = "bob",
-    };
-    const selector_charlie: MvarChannel = .{
-        .mvar_a = try Mvar.init(gpa, 10),
-        .mvar_b = try Mvar.init(gpa, 10),
-        .master = "selector",
-        .other = "charlie",
-    };
-    const charlie_alice: MvarChannel = .{
-        .mvar_a = try Mvar.init(gpa, 10),
-        .mvar_b = try Mvar.init(gpa, 10),
-        .master = "charlie",
-        .other = "alice",
-    };
-    const charlie_bob: MvarChannel = .{
-        .mvar_a = try Mvar.init(gpa, 10),
-        .mvar_b = try Mvar.init(gpa, 10),
-        .master = "charlie",
-        .other = "bob",
-    };
-    const bob_alice: MvarChannel = .{
-        .mvar_a = try Mvar.init(gpa, 10),
-        .mvar_b = try Mvar.init(gpa, 10),
-        .master = "bob",
-        .other = "alice",
-    };
-
-    const AllChannel = struct {
-        selector_alice: MvarChannel,
-        selector_bob: MvarChannel,
-        selector_charlie: MvarChannel,
-        charlie_alice: MvarChannel,
-        charlie_bob: MvarChannel,
-        bob_alice: MvarChannel,
-    };
-
-    const all_channel: AllChannel = .{
-        .selector_alice = selector_alice,
-        .selector_bob = selector_bob,
-        .selector_charlie = selector_charlie,
-        .charlie_alice = charlie_alice,
-        .charlie_bob = charlie_bob,
-        .bob_alice = bob_alice,
-    };
+    var connect_channel_map: channel.ConnectChannelMap(AllRole) = .init();
+    try connect_channel_map.generate_all_MvarChannel(gpa, 10);
+    connect_channel_map.enable_log(.charlie); //enable charlie channel log
 
     const alice = struct {
-        fn clientFn(all_channel_: AllChannel) !void {
+        fn clientFn(ccm: *channel.ConnectChannelMap(AllRole)) !void {
             var alice_context: AliceContext = undefined;
             alice_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
 
-            try Runner.runProtocol(
-                .alice,
-                .{
-                    .selector = all_channel_.selector_alice.flip(),
-                    .bob = all_channel_.bob_alice.flip(),
-                    .charlie = all_channel_.charlie_alice.flip(),
-                },
-                curr_id,
-                &alice_context,
-            );
+            try Runner.runProtocol(.alice, false, ccm, curr_id, &alice_context);
         }
     };
 
-    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{all_channel});
-    defer alice_thread.join();
-
     const bob = struct {
-        fn clientFn(all_channel_: AllChannel) !void {
+        fn clientFn(ccm: *channel.ConnectChannelMap(AllRole)) !void {
             var bob_context: BobContext = undefined;
             bob_context.counter = 0;
             const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
 
-            try Runner.runProtocol(
-                .bob,
-                .{
-                    .selector = all_channel_.selector_bob.flip(),
-                    .alice = all_channel_.bob_alice,
-                    .charlie = all_channel_.charlie_bob.flip(),
-                },
-                curr_id,
-                &bob_context,
-            );
+            try Runner.runProtocol(.bob, false, ccm, curr_id, &bob_context);
         }
     };
 
-    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{all_channel});
-    defer bob_thread.join();
-
     const selector = struct {
-        fn clientFn(all_channel_: AllChannel) !void {
+        fn clientFn(ccm: *channel.ConnectChannelMap(AllRole)) !void {
             var selector_context: SelectorContext = undefined;
             selector_context.counter_arr = @splat(0);
             const fill_ptr: []u8 = @ptrCast(&selector_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
             selector_context.times_2pc = 0;
 
-            try Runner.runProtocol(
-                .selector,
-                .{
-                    .alice = all_channel_.selector_alice,
-                    .bob = all_channel_.selector_bob,
-                    .charlie = all_channel_.selector_charlie,
-                },
-                curr_id,
-                &selector_context,
-            );
+            try Runner.runProtocol(.selector, false, ccm, curr_id, &selector_context);
         }
     };
 
-    const selector_thread = try std.Thread.spawn(.{}, selector.clientFn, .{all_channel});
+    const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{&connect_channel_map});
+    defer alice_thread.join();
+    const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{&connect_channel_map});
+    defer bob_thread.join();
+    const selector_thread = try std.Thread.spawn(.{}, selector.clientFn, .{&connect_channel_map});
     defer selector_thread.join();
 
     var charlie_context: CharlieContext = undefined;
@@ -315,14 +235,5 @@ pub fn main() !void {
     const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
     std.crypto.random.bytes(fill_ptr);
 
-    try Runner.runProtocol(
-        .charlie,
-        .{
-            .selector = all_channel.selector_charlie.flip().enable_log(),
-            .alice = all_channel.charlie_alice.enable_log(),
-            .bob = all_channel.charlie_bob.enable_log(),
-        },
-        curr_id,
-        &charlie_context,
-    );
+    try Runner.runProtocol(.charlie, false, &connect_channel_map, curr_id, &charlie_context);
 }
