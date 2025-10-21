@@ -10,20 +10,23 @@ const AllRole = enum { alice, bob, charlie };
 const AliceContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
-    pingpong: pingpong.ClientContext,
+    pingpong_client: pingpong.ClientContext,
+    pingpong_server: pingpong.ServerContext,
 };
 
 const BobContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
-    pingpong: pingpong.ServerContext,
+    pingpong_client: pingpong.ClientContext,
+    pingpong_server: pingpong.ServerContext,
 };
 
 const CharlieContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
     times_2pc: u32,
-    pingpong: pingpong.ClientContext,
+    pingpong_client: pingpong.ClientContext,
+    pingpong_server: pingpong.ServerContext,
 };
 
 const Context = struct {
@@ -38,7 +41,15 @@ pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);
 
 fn PingPong(client: AllRole, server: AllRole, Next: type) type {
-    return pingpong.MkPingPong(AllRole, client, server, Context{}, .pingpong, .pingpong, Next);
+    return pingpong.MkPingPong(
+        AllRole,
+        client,
+        server,
+        Context{},
+        .pingpong_client,
+        .pingpong_server,
+        Next,
+    );
 }
 
 fn CAB(Next: type) type {
@@ -53,9 +64,9 @@ fn BAC(Next: type) type {
 
 //Randomly select a 2pc protocol
 pub const Random2pc = union(enum) {
-    charlie_as_coordinator: Data(void, PingPong(.alice, .bob, PingPong(.charlie, .bob, CAB(@This()).Start).Start).Start),
+    charlie_as_coordinator: Data(void, PingPong(.charlie, .bob, PingPong(.bob, .alice, CAB(@This()).Start).Start).Start),
     alice_as_coordinator: Data(void, PingPong(.alice, .bob, ABC(@This()).Start).Start),
-    bob_as_coordinator: Data(void, PingPong(.charlie, .bob, BAC(@This()).Start).Start),
+    bob_as_coordinator: Data(void, PingPong(.bob, .charlie, BAC(@This()).Start).Start),
     exit: Data(void, ps.Exit),
 
     pub const info: ps.ProtocolInfo("random_2pc", AllRole, Context{}, &.{ .charlie, .alice, .bob }, &.{}) = .{
@@ -66,7 +77,7 @@ pub const Random2pc = union(enum) {
     pub fn process(ctx: *CharlieContext) !@This() {
         ctx.times_2pc += 1;
         std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
-        if (ctx.times_2pc > 10) {
+        if (ctx.times_2pc > 3) {
             return .{ .exit = .{ .data = {} } };
         }
 
@@ -227,7 +238,8 @@ pub fn main() !void {
 
             var alice_context: AliceContext = undefined;
             alice_context.counter = 0;
-            alice_context.pingpong.client_counter = 0;
+            alice_context.pingpong_client.client_counter = 0;
+            alice_context.pingpong_server.server_counter = 0;
             const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
 
@@ -281,7 +293,8 @@ pub fn main() !void {
 
             var bob_context: BobContext = undefined;
             bob_context.counter = 0;
-            bob_context.pingpong.server_counter = 0;
+            bob_context.pingpong_client.client_counter = 0;
+            bob_context.pingpong_server.server_counter = 0;
             const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
 
@@ -331,7 +344,9 @@ pub fn main() !void {
     var charlie_context: CharlieContext = undefined;
     charlie_context.counter = 0;
     charlie_context.times_2pc = 0;
-    charlie_context.pingpong.client_counter = 0;
+
+    charlie_context.pingpong_client.client_counter = 0;
+    charlie_context.pingpong_server.server_counter = 0;
     const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
     std.crypto.random.bytes(fill_ptr);
 
