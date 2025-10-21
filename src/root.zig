@@ -339,9 +339,14 @@ pub fn Runner(
                     const info = comptime State.info;
                     const sender: Role = comptime info.sender;
                     const receiver: []const Role = comptime info.receiver;
-                    // const internal_roles = comptime @TypeOf(info).internal_roles;
+                    const internal_roles = comptime @TypeOf(info).internal_roles;
+                    const extern_state = comptime @TypeOf(info).extern_state;
 
-                    if (comptime curr_role == sender) {
+                    if (comptime std.mem.indexOfScalar(Role, internal_roles, curr_role) == null) {
+                        const next_id: u8 = try @field(mult_channel, @tagName(internal_roles[0])).recv_notify();
+                        const next_state_id: StateId = @enumFromInt(next_id);
+                        continue :sw next_state_id;
+                    } else if (comptime curr_role == sender) {
                         const result = try State.process(ctx);
                         inline for (receiver) |rvr| {
                             try @field(mult_channel, @tagName(rvr)).send(state_id, result);
@@ -349,19 +354,51 @@ pub fn Runner(
                         switch (result) {
                             inline else => |new_fsm_state_wit| {
                                 const NewState = @TypeOf(new_fsm_state_wit).State;
+                                {
+                                    if (comptime NewState == Exit) return;
+
+                                    if (comptime std.mem.indexOfScalar(type, extern_state, NewState) != null and
+                                        curr_role == internal_roles[0])
+                                    {
+                                        //TODO: need extern_roles list?
+                                        inline for (0..@typeInfo(Role).@"enum".fields.len) |i| {
+                                            const tmp_role: Role = @enumFromInt(i);
+                                            if (comptime std.mem.indexOfScalar(Role, internal_roles, tmp_role) == null) {
+                                                try @field(mult_channel, @tagName(tmp_role)).send_notify(@as(u8, @intFromEnum(idFromState(NewState))));
+                                            }
+                                        }
+                                    }
+                                }
+
                                 continue :sw comptime idFromState(NewState);
                             },
                         }
                     } else {
-                        const midx: ?usize = comptime blk: {
-                            for (0.., receiver) |i, rvr| {
-                                if (curr_role == rvr) break :blk i;
-                            }
-                            break :blk null;
-                        };
-
-                        if (midx) |idx| {
+                        if (comptime std.mem.indexOfScalar(Role, receiver, curr_role)) |idx| {
                             const result = try @field(mult_channel, @tagName(sender)).recv(state_id, State);
+
+                            switch (result) {
+                                inline else => |new_fsm_state_wit| {
+                                    const NewState = @TypeOf(new_fsm_state_wit).State;
+
+                                    {
+                                        if (comptime NewState == Exit) return;
+
+                                        if (comptime std.mem.indexOfScalar(type, extern_state, NewState) != null and
+                                            curr_role == internal_roles[0])
+                                        {
+                                            //TODO: need extern_roles list?
+                                            inline for (0..@typeInfo(Role).@"enum".fields.len) |i| {
+                                                const tmp_role: Role = @enumFromInt(i);
+                                                if (comptime std.mem.indexOfScalar(Role, internal_roles, tmp_role) == null) {
+                                                    try @field(mult_channel, @tagName(tmp_role)).send_notify(@as(u8, @intFromEnum(idFromState(NewState))));
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+
                             const fn_name = std.fmt.comptimePrint("preprocess_{d}", .{idx});
                             if (@hasDecl(State, fn_name)) {
                                 try @field(State, fn_name)(ctx, result);
@@ -369,15 +406,33 @@ pub fn Runner(
 
                             switch (result) {
                                 inline else => |new_fsm_state_wit| {
-                                    const NewData = @TypeOf(new_fsm_state_wit);
-                                    continue :sw comptime idFromState(NewData.State);
+                                    const NewState = @TypeOf(new_fsm_state_wit).State;
+                                    continue :sw comptime idFromState(NewState);
                                 },
                             }
                         } else {
                             switch (@typeInfo(State)) {
                                 .@"union" => |U| {
                                     comptime std.debug.assert(U.fields.len == 1);
-                                    continue :sw comptime idFromState(U.fields[0].type.State);
+                                    const NewState = U.fields[0].type.State;
+
+                                    {
+                                        if (comptime NewState == Exit) return;
+
+                                        if (comptime std.mem.indexOfScalar(type, extern_state, NewState) != null and
+                                            curr_role == internal_roles[0])
+                                        {
+                                            //TODO: need extern_roles list?
+                                            inline for (0..@typeInfo(Role).@"enum".fields.len) |i| {
+                                                const tmp_role: Role = @enumFromInt(i);
+                                                if (comptime std.mem.indexOfScalar(Role, internal_roles, tmp_role) == null) {
+                                                    try @field(mult_channel, @tagName(tmp_role)).send_notify(@as(u8, @intFromEnum(idFromState(NewState))));
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    continue :sw comptime idFromState(NewState);
                                 },
                                 else => unreachable,
                             }
