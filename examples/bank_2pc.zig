@@ -51,7 +51,13 @@ const Context = struct {
     bob: type = BobContext,
 };
 
-fn bank_2pc(sender: Role, receiver: []const Role) ps.ProtocolInfo("bank_2pc", Role, Context{}) {
+fn bank_2pc(sender: Role, receiver: []const Role) ps.ProtocolInfo(
+    "bank_2pc",
+    Role,
+    Context{},
+    &.{ .client, .coordinator, .alice, .bob },
+    &.{},
+) {
     return .{ .sender = sender, .receiver = receiver };
 }
 
