@@ -53,7 +53,7 @@ fn BAC(Next: type) type {
 
 //Randomly select a 2pc protocol
 pub const Random2pc = union(enum) {
-    charlie_as_coordinator: Data(void, PingPong(.charlie, .bob, CAB(@This()).Start).Start),
+    charlie_as_coordinator: Data(void, PingPong(.alice, .bob, PingPong(.charlie, .bob, CAB(@This()).Start).Start).Start),
     alice_as_coordinator: Data(void, PingPong(.alice, .bob, ABC(@This()).Start).Start),
     bob_as_coordinator: Data(void, PingPong(.charlie, .bob, BAC(@This()).Start).Start),
     exit: Data(void, ps.Exit),
