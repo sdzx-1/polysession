@@ -335,11 +335,11 @@ pub fn Runner(
             if (comptime std.mem.indexOfScalar(type, extern_state, NewState) != null and
                 curr_role == internal_roles[0])
             {
-                //TODO: need extern_roles list?
-                inline for (0..@typeInfo(Role).@"enum".fields.len) |i| {
-                    const tmp_role: Role = @enumFromInt(i);
-                    if (comptime std.mem.indexOfScalar(Role, internal_roles, tmp_role) == null) {
-                        try @field(mult_channel, @tagName(tmp_role)).send_notify(@as(u8, @intFromEnum(idFromState(NewState))));
+                const new_internal_roles = comptime @TypeOf(NewState.info).internal_roles;
+                //Select roles from the `new_internal_roles` that are not in the `internal_roles` to send notifications
+                inline for (new_internal_roles) |role| {
+                    if (comptime std.mem.indexOfScalar(Role, internal_roles, role) == null) {
+                        try @field(mult_channel, @tagName(role)).send_notify(@as(u8, @intFromEnum(idFromState(NewState))));
                     }
                 }
             }
