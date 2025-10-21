@@ -15,7 +15,6 @@ pub fn build(b: *std.Build) void {
     } = &.{
         // zig fmt: off
         .{ .name = "simple", .path = "examples/simple.zig" },
-        .{ .name = "bank_2pc",    .path = "examples/bank_2pc.zig" },
         .{ .name = "2pc-generic",    .path = "examples/two_phase_commit_generic.zig" },
         //zig fmt: on
     };
