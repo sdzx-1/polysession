@@ -43,7 +43,10 @@ pub fn encode(writer: *std.Io.Writer, state_id: anytype, val: anytype) !void {
 pub fn decode(reader: *std.Io.Reader, state_id: anytype, T: type) !T {
     const id: u8 = @intFromEnum(state_id);
     const rid = try reader.takeByte();
-    if (id != rid) return error.IncorrectStatusReceived;
+    if (id != rid and T != Notify) {
+        std.debug.print("id: {d}, rid: {d}\n", .{ id, rid });
+        return error.IncorrectStatusReceived;
+    }
     if (T == Notify) {
         const next_id = try reader.takeByte();
         return .{ .polysession_notify = next_id };
