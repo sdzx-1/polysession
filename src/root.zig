@@ -328,6 +328,7 @@ pub fn Runner(
 
         fn notify_extern_roles(
             comptime curr_role: Role,
+            comptime mult_channel_static_index_role: bool,
             comptime state_id: StateId,
             comptime NewState: type,
             comptime internal_roles: []const Role,
@@ -342,13 +343,17 @@ pub fn Runner(
                 //Select roles from the `new_internal_roles` that are not in the `internal_roles` to send notifications
                 inline for (new_internal_roles) |role| {
                     if (comptime std.mem.indexOfScalar(Role, internal_roles, role) == null) {
-                        try @field(mult_channel, @tagName(role)).send(state_id, Notify{ .polysession_notify = @intFromEnum(idFromState(NewState)) });
+                        if (mult_channel_static_index_role)
+                            try @field(mult_channel, @tagName(role)).send(state_id, Notify{ .polysession_notify = @intFromEnum(idFromState(NewState)) })
+                        else
+                            try mult_channel.send(curr_role, role, state_id, Notify{ .polysession_notify = @intFromEnum(idFromState(NewState)) });
                     }
                 }
             }
         }
         pub fn runProtocol(
             comptime curr_role: Role,
+            comptime mult_channel_static_index_role: bool,
             mult_channel: anytype,
             curr_id: StateId,
             ctx: *State_.info.RoleCtx(curr_role),
@@ -366,29 +371,41 @@ pub fn Runner(
                     const extern_state = comptime @TypeOf(info).extern_state;
 
                     if (comptime std.mem.indexOfScalar(Role, internal_roles, curr_role) == null) {
-                        const notify: Notify = try @field(mult_channel, @tagName(internal_roles[0])).recv(state_id, Notify);
+                        const notify: Notify =
+                            if (mult_channel_static_index_role)
+                                try @field(mult_channel, @tagName(internal_roles[0])).recv(state_id, Notify)
+                            else
+                                try mult_channel.recv(curr_role, internal_roles[0], state_id, Notify);
+
                         const next_state_id: StateId = @enumFromInt(notify.polysession_notify);
                         continue :sw next_state_id;
                     } else if (comptime curr_role == sender) {
                         const result = try State.process(ctx);
                         inline for (receiver) |rvr| {
-                            try @field(mult_channel, @tagName(rvr)).send(state_id, result);
+                            if (mult_channel_static_index_role)
+                                try @field(mult_channel, @tagName(rvr)).send(state_id, result)
+                            else
+                                try mult_channel.send(curr_role, rvr, state_id, result);
                         }
                         switch (result) {
                             inline else => |new_fsm_state_wit| {
                                 const NewState = @TypeOf(new_fsm_state_wit).State;
-                                try notify_extern_roles(curr_role, state_id, NewState, internal_roles, extern_state, mult_channel);
+                                try notify_extern_roles(curr_role, mult_channel_static_index_role, state_id, NewState, internal_roles, extern_state, mult_channel);
                                 continue :sw comptime idFromState(NewState);
                             },
                         }
                     } else {
                         if (comptime std.mem.indexOfScalar(Role, receiver, curr_role)) |idx| {
-                            const result = try @field(mult_channel, @tagName(sender)).recv(state_id, State);
+                            const result =
+                                if (mult_channel_static_index_role)
+                                    try @field(mult_channel, @tagName(sender)).recv(state_id, State)
+                                else
+                                    try mult_channel.recv(curr_role, sender, state_id, State);
 
                             switch (result) {
                                 inline else => |new_fsm_state_wit| {
                                     const NewState = @TypeOf(new_fsm_state_wit).State;
-                                    try notify_extern_roles(curr_role, state_id, NewState, internal_roles, extern_state, mult_channel);
+                                    try notify_extern_roles(curr_role, mult_channel_static_index_role, state_id, NewState, internal_roles, extern_state, mult_channel);
                                 },
                             }
 
@@ -408,7 +425,7 @@ pub fn Runner(
                                 .@"union" => |U| {
                                     comptime std.debug.assert(U.fields.len == 1);
                                     const NewState = U.fields[0].type.State;
-                                    try notify_extern_roles(curr_role, state_id, NewState, internal_roles, extern_state, mult_channel);
+                                    try notify_extern_roles(curr_role, mult_channel_static_index_role, state_id, NewState, internal_roles, extern_state, mult_channel);
                                     continue :sw comptime idFromState(NewState);
                                 },
                                 else => unreachable,

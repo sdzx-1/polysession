@@ -245,6 +245,7 @@ pub fn main() !void {
 
             try Runner.runProtocol(
                 .alice,
+                true,
                 .{
                     .charlie = StreamChannel{
                         .reader = stream_reader.interface(),
@@ -300,6 +301,7 @@ pub fn main() !void {
 
             try Runner.runProtocol(
                 .bob,
+                true,
                 .{
                     .charlie = StreamChannel{
                         .reader = stream_reader.interface(),
@@ -352,6 +354,7 @@ pub fn main() !void {
 
     try Runner.runProtocol(
         .charlie,
+        true,
         .{
             .alice = StreamChannel{
                 .reader = alice_stream_reader.interface(),
