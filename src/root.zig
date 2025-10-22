@@ -339,9 +339,11 @@ pub fn Runner(
             if (comptime std.mem.indexOfScalar(type, extern_state, NewState) != null and
                 curr_role == internal_roles[0])
             {
-                const new_internal_roles = comptime @TypeOf(NewState.info).internal_roles;
-                //Select roles from the `new_internal_roles` that are not in the `internal_roles` to send notifications
-                inline for (new_internal_roles) |role| {
+
+                //It turns out that all roles that do not belong to internal_roles must be notified.
+                //This is equivalent to synchronizing the status once each protocol ends.
+                inline for (0..@typeInfo(Role).@"enum".fields.len) |i| {
+                    const role: Role = @enumFromInt(i);
                     if (comptime std.mem.indexOfScalar(Role, internal_roles, role) == null) {
                         if (mult_channel_static_index_role)
                             try @field(mult_channel, @tagName(role)).send(state_id, Notify{ .polysession_notify = @intFromEnum(idFromState(NewState)) })
