@@ -27,7 +27,7 @@ pub fn main() !void {
 
     var mvar_channel_map: MvarChannelMap = .init();
     try mvar_channel_map.generate_all_MvarChannel(gpa, 10);
-    mvar_channel_map.enable_log(.charlie); //enable charlie channel log
+    mvar_channel_map.enable_log(.selector); //enable charlie channel log
 
     const alice = struct {
         fn clientFn(mcm: *MvarChannelMap) !void {
@@ -145,9 +145,24 @@ fn BAC(Next: type) type {
 
 //Randomly select a 2pc protocol
 pub const Random2pc = union(enum) {
-    charlie_as_coordinator: Data(void, PingPong(.charlie, .bob, PingPong(.bob, .alice, CAB(@This()).Start).Start).Start),
-    alice_as_coordinator: Data(void, PingPong(.alice, .bob, ABC(@This()).Start).Start),
-    bob_as_coordinator: Data(void, PingPong(.bob, .charlie, BAC(@This()).Start).Start),
+    charlie_as_coordinator: Data(
+        void,
+        PingPong(
+            .alice,
+            .bob,
+            PingPong(
+                .bob,
+                .charlie,
+                PingPong(
+                    .charlie,
+                    .alice,
+                    CAB(@This()).Start,
+                ).Start,
+            ).Start,
+        ).Start,
+    ),
+    alice_as_coordinator: Data(void, PingPong(.charlie, .bob, ABC(@This()).Start).Start),
+    bob_as_coordinator: Data(void, PingPong(.alice, .charlie, BAC(@This()).Start).Start),
     exit: Data(void, ps.Exit),
 
     pub const info: ps.ProtocolInfo(
@@ -164,7 +179,7 @@ pub const Random2pc = union(enum) {
     pub fn process(ctx: *SelectorContext) !@This() {
         ctx.times_2pc += 1;
         std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
-        if (ctx.times_2pc > 3) {
+        if (ctx.times_2pc > 300) {
             return .{ .exit = .{ .data = {} } };
         }
 
