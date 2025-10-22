@@ -10,6 +10,21 @@ pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
 
+    var arg_iter = try std.process.argsWithAllocator(gpa);
+    defer arg_iter.deinit();
+
+    _ = arg_iter.next();
+    if (arg_iter.next()) |arg_str| {
+        std.debug.print("arg_str {s}\n", .{arg_str});
+        if (std.mem.eql(u8, "dot", arg_str)) {
+            const graph: ps.Graph = try ps.Graph.initWithFsm(gpa, Random2pc);
+            const graph_fs = try std.fs.cwd().createFile("t.dot", .{});
+            var graph_fs_writer = graph_fs.writer(try gpa.alloc(u8, 1 << 20));
+            try graph.generateDot(&graph_fs_writer.interface);
+            try graph_fs_writer.interface.flush();
+        }
+    }
+
     var mvar_channel_map: MvarChannelMap = .init();
     try mvar_channel_map.generate_all_MvarChannel(gpa, 10);
     mvar_channel_map.enable_log(.charlie); //enable charlie channel log
@@ -44,17 +59,29 @@ pub fn main() !void {
         }
     };
 
+    const selector = struct {
+        fn clientFn(mcm: *MvarChannelMap) !void {
+            var charlie_context: SelectorContext = .{};
+            const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
+            std.crypto.random.bytes(fill_ptr);
+
+            try Runner.runProtocol(.selector, false, mcm, curr_id, &charlie_context);
+        }
+    };
+
     const alice_thread = try std.Thread.spawn(.{}, alice.clientFn, .{&mvar_channel_map});
     const bob_thread = try std.Thread.spawn(.{}, bob.clientFn, .{&mvar_channel_map});
     const charlie_thread = try std.Thread.spawn(.{}, charlie.clientFn, .{&mvar_channel_map});
+    const selector_thread = try std.Thread.spawn(.{}, selector.clientFn, .{&mvar_channel_map});
 
     alice_thread.join();
     bob_thread.join();
     charlie_thread.join();
+    selector_thread.join();
 }
 
 //
-const AllRole = enum { alice, bob, charlie };
+const AllRole = enum { selector, alice, bob, charlie };
 
 const AliceContext = struct {
     counter: u32 = 0,
@@ -73,15 +100,20 @@ const BobContext = struct {
 const CharlieContext = struct {
     counter: u32 = 0,
     xoshiro256: std.Random.Xoshiro256 = undefined,
-    times_2pc: u32 = 0,
     pingpong_client: pingpong.ClientContext = .{ .client_counter = 0 },
     pingpong_server: pingpong.ServerContext = .{ .server_counter = 0 },
+};
+
+const SelectorContext = struct {
+    times_2pc: u32 = 0,
+    xoshiro256: std.Random.Xoshiro256 = undefined,
 };
 
 const Context = struct {
     alice: type = AliceContext,
     bob: type = BobContext,
     charlie: type = CharlieContext,
+    selector: type = SelectorContext,
 };
 
 pub const EnterFsmState = Random2pc;
@@ -118,12 +150,18 @@ pub const Random2pc = union(enum) {
     bob_as_coordinator: Data(void, PingPong(.bob, .charlie, BAC(@This()).Start).Start),
     exit: Data(void, ps.Exit),
 
-    pub const info: ps.ProtocolInfo("random_2pc", AllRole, Context{}, &.{ .charlie, .alice, .bob }, &.{}) = .{
-        .sender = .charlie,
-        .receiver = &.{ .alice, .bob },
+    pub const info: ps.ProtocolInfo(
+        "random_2pc",
+        AllRole,
+        Context{},
+        &.{ .selector, .charlie, .alice, .bob },
+        &.{},
+    ) = .{
+        .sender = .selector,
+        .receiver = &.{ .charlie, .alice, .bob },
     };
 
-    pub fn process(ctx: *CharlieContext) !@This() {
+    pub fn process(ctx: *SelectorContext) !@This() {
         ctx.times_2pc += 1;
         std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
         if (ctx.times_2pc > 3) {
