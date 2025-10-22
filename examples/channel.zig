@@ -11,6 +11,17 @@ pub const StreamChannel = struct {
     master: []const u8 = &.{},
     other: []const u8 = &.{},
 
+    pub fn recv_notify(self: @This()) !u8 {
+        if (self.log) std.debug.print("{s} recv_notify form {s}\n", .{ self.master, self.other });
+        return try self.reader.takeByte();
+    }
+
+    pub fn send_notify(self: @This(), val: u8) !void {
+        try self.writer.writeByte(val);
+        try self.writer.flush();
+        if (self.log) std.debug.print("{s} send_notify to   {s}\n", .{ self.master, self.other });
+    }
+
     pub fn recv(self: @This(), state_id: anytype, T: type) !T {
         const res = try Codec.decode(self.reader, state_id, T);
         if (self.log) std.debug.print("{s} recv form {s}: {any}\n", .{ self.master, self.other, res });

@@ -20,10 +20,24 @@ pub const Context = struct {
     server: type = ServerContext,
 };
 
-const PingPong = pingpong.MkPingPong(Role, .client, .server, Context{}, .pingpong, .pingpong);
-const SendFile = sendfile.MkSendFile(Role, .server, .client, Context{}, 20 * 1024 * 1024, .send_context, .recv_context);
+fn PingPong(NextFsmState: type) type {
+    return pingpong.MkPingPong(Role, .client, .server, Context{}, .pingpong, .pingpong, NextFsmState);
+}
+fn SendFile(Successed: type, Failed: type) type {
+    return sendfile.MkSendFile(
+        Role,
+        .server,
+        .client,
+        Context{},
+        20 * 1024 * 1024,
+        .send_context,
+        .recv_context,
+        Successed,
+        Failed,
+    );
+}
 
-pub const EnterFsmState = PingPong.Start(SendFile.Start(PingPong.Start(ps.Exit), ps.Exit));
+pub const EnterFsmState = PingPong(SendFile(PingPong(ps.Exit).Start, ps.Exit).Start).Start;
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);

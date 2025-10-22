@@ -18,42 +18,41 @@ pub fn MkPingPong(
     comptime context: anytype,
     comptime client_ctx_field: std.meta.FieldEnum(@field(context, @tagName(client))),
     comptime server_ctx_field: std.meta.FieldEnum(@field(context, @tagName(server))),
+    comptime NextFsmState: type,
 ) type {
     return struct {
         fn pingpogn_info(
             sender: Role,
             receiver: []const Role,
-        ) ps.ProtocolInfo("pingpong", Role, context) {
+        ) ps.ProtocolInfo("pingpong", Role, context, &.{ client, server }, &.{NextFsmState}) {
             return .{ .sender = sender, .receiver = receiver };
         }
 
-        pub fn Start(NextFsmState: type) type {
-            return union(enum) {
-                ping: Data(i32, ps.Cast("pingpong", context, server, client, i32, PongFn, @This())),
-                next: Data(void, NextFsmState),
+        pub const Start = union(enum) {
+            ping: Data(i32, info.Cast(server, client, i32, PongFn, @This())),
+            next: Data(void, NextFsmState),
 
-                pub const info = pingpogn_info(client, &.{server});
+            pub const info = pingpogn_info(client, &.{server});
 
-                pub fn process(parent_ctx: *info.RoleCtx(client)) !@This() {
-                    const ctx = client_ctxFromParent(parent_ctx);
-                    if (ctx.client_counter >= 10) {
-                        ctx.client_counter = 0;
-                        return .{ .next = .{ .data = {} } };
-                    }
-                    return .{ .ping = .{ .data = ctx.client_counter } };
+            pub fn process(parent_ctx: *info.RoleCtx(client)) !@This() {
+                const ctx = client_ctxFromParent(parent_ctx);
+                if (ctx.client_counter >= 10) {
+                    ctx.client_counter = 0;
+                    return .{ .next = .{ .data = {} } };
                 }
+                return .{ .ping = .{ .data = ctx.client_counter } };
+            }
 
-                pub fn preprocess_0(parent_ctx: *info.RoleCtx(server), msg: @This()) !void {
-                    const ctx = server_ctxFromParent(parent_ctx);
-                    switch (msg) {
-                        .ping => |val| ctx.server_counter = val.data,
-                        .next => {
-                            ctx.server_counter = 0;
-                        },
-                    }
+            pub fn preprocess_0(parent_ctx: *info.RoleCtx(server), msg: @This()) !void {
+                const ctx = server_ctxFromParent(parent_ctx);
+                switch (msg) {
+                    .ping => |val| ctx.server_counter = val.data,
+                    .next => {
+                        ctx.server_counter = 0;
+                    },
                 }
-            };
-        }
+            }
+        };
 
         const PongFn = struct {
             pub fn process(parent_ctx: *@field(context, @tagName(server))) !i32 {

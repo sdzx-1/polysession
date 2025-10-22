@@ -381,7 +381,7 @@ pub fn generateMermaid(
     }
 }
 
-pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph {
+pub fn initWithFsm(allocator: std.mem.Allocator, comptime State_: type) !Graph {
     @setEvalBranchQuota(2000000);
 
     var arena: std.heap.ArenaAllocator = .init(allocator);
@@ -392,7 +392,7 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph
     var nodes: std.ArrayListUnmanaged(Node) = .empty;
     var edges: std.ArrayListUnmanaged(Edge) = .empty;
 
-    const state_map: ps.StateMap = comptime .init(FsmState);
+    const state_map: ps.StateMap = comptime .init(State_);
 
     inline for (state_map.states, state_map.state_machine_names, 0..) |State, fsm_name, state_idx| {
         try nodes.append(arena_allocator, .{
@@ -409,9 +409,9 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph
         switch (@typeInfo(State)) {
             .@"union" => |un| {
                 inline for (un.fields) |field| {
-                    const NextFsmState = field.type.FsmState;
+                    const NextState = field.type.State;
 
-                    const next_state_idx: u32 = @intFromEnum(state_map.idFromState(NextFsmState));
+                    const next_state_idx: u32 = @intFromEnum(state_map.idFromState(NextState));
 
                     try edges.append(arena_allocator, .{
                         .from = @intCast(state_idx),
@@ -438,7 +438,7 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime FsmState: type) !Graph
     return .{
         .arena = arena,
         .edges = edges,
-        .name = @TypeOf(FsmState.info).Name,
+        .name = @TypeOf(State_.info).Name,
         .nodes = nodes,
     };
 }

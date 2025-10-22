@@ -3,23 +3,30 @@ const ps = @import("polysession");
 const Data = ps.Data;
 const StreamChannel = @import("channel.zig").StreamChannel;
 const net = std.net;
+const pingpong = @import("pingpong.zig");
 
 const AllRole = enum { alice, bob, charlie };
 
 const AliceContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
+    pingpong_client: pingpong.ClientContext,
+    pingpong_server: pingpong.ServerContext,
 };
 
 const BobContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
+    pingpong_client: pingpong.ClientContext,
+    pingpong_server: pingpong.ServerContext,
 };
 
 const CharlieContext = struct {
     counter: u32,
     xoshiro256: std.Random.Xoshiro256,
     times_2pc: u32,
+    pingpong_client: pingpong.ClientContext,
+    pingpong_server: pingpong.ServerContext,
 };
 
 const Context = struct {
@@ -28,24 +35,41 @@ const Context = struct {
     charlie: type = CharlieContext,
 };
 
-// pub const EnterFsmState = CAB.Start(ABC.Start(BAC.Start(ps.Exit)));
 pub const EnterFsmState = Random2pc;
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);
 
-const CAB = mk2pc(AllRole, .charlie, .alice, .bob, Context{});
-const ABC = mk2pc(AllRole, .alice, .bob, .charlie, Context{});
-const BAC = mk2pc(AllRole, .bob, .alice, .charlie, Context{});
+fn PingPong(client: AllRole, server: AllRole, Next: type) type {
+    return pingpong.MkPingPong(
+        AllRole,
+        client,
+        server,
+        Context{},
+        .pingpong_client,
+        .pingpong_server,
+        Next,
+    );
+}
+
+fn CAB(Next: type) type {
+    return mk2pc(AllRole, .charlie, .alice, .bob, Context{}, Next);
+}
+fn ABC(Next: type) type {
+    return mk2pc(AllRole, .alice, .bob, .charlie, Context{}, Next);
+}
+fn BAC(Next: type) type {
+    return mk2pc(AllRole, .bob, .alice, .charlie, Context{}, Next);
+}
 
 //Randomly select a 2pc protocol
 pub const Random2pc = union(enum) {
-    charlie_as_coordinator: Data(void, CAB.Start(@This())),
-    alice_as_coordinator: Data(void, ABC.Start(@This())),
-    bob_as_coordinator: Data(void, BAC.Start(@This())),
+    charlie_as_coordinator: Data(void, PingPong(.charlie, .bob, PingPong(.bob, .alice, CAB(@This()).Start).Start).Start),
+    alice_as_coordinator: Data(void, PingPong(.alice, .bob, ABC(@This()).Start).Start),
+    bob_as_coordinator: Data(void, PingPong(.bob, .charlie, BAC(@This()).Start).Start),
     exit: Data(void, ps.Exit),
 
-    pub const info: ps.ProtocolInfo("random_2pc", AllRole, Context{}) = .{
+    pub const info: ps.ProtocolInfo("random_2pc", AllRole, Context{}, &.{ .charlie, .alice, .bob }, &.{}) = .{
         .sender = .charlie,
         .receiver = &.{ .alice, .bob },
     };
@@ -53,7 +77,7 @@ pub const Random2pc = union(enum) {
     pub fn process(ctx: *CharlieContext) !@This() {
         ctx.times_2pc += 1;
         std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
-        if (ctx.times_2pc > 10) {
+        if (ctx.times_2pc > 3) {
             return .{ .exit = .{ .data = {} } };
         }
 
@@ -66,16 +90,6 @@ pub const Random2pc = union(enum) {
             else => unreachable,
         }
     }
-
-    pub fn preprocess_0(ctx: *AliceContext, msg: @This()) !void {
-        _ = ctx;
-        _ = msg;
-    }
-
-    pub fn preprocess_1(ctx: *BobContext, msg: @This()) !void {
-        _ = ctx;
-        _ = msg;
-    }
 };
 
 //
@@ -85,59 +99,53 @@ pub fn mk2pc(
     alice: Role,
     bob: Role,
     context: anytype,
+    NextFsmState: type,
 ) type {
     return struct {
-        fn two_pc(sender: Role, receiver: []const Role) ps.ProtocolInfo("2pc_generic", Role, context) {
+        fn two_pc(sender: Role, receiver: []const Role) ps.ProtocolInfo(
+            "2pc_generic",
+            Role,
+            context,
+            &.{ coordinator, alice, bob },
+            &.{NextFsmState},
+        ) {
             return .{ .sender = sender, .receiver = receiver };
         }
 
-        pub fn Start(NextFsmState: type) type {
-            return union(enum) {
-                begin: Data(void, AliceResp(NextFsmState)),
+        pub const Start = union(enum) {
+            begin: Data(void, AliceResp),
 
-                pub const info = two_pc(coordinator, &.{ alice, bob });
+            pub const info = two_pc(coordinator, &.{ alice, bob });
 
-                pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
-                    _ = ctx;
-                    return .{ .begin = .{ .data = {} } };
+            pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
+                _ = ctx;
+                return .{ .begin = .{ .data = {} } };
+            }
+        };
+
+        pub const AliceResp = union(enum) {
+            resp: Data(bool, BobResp),
+
+            pub const info = two_pc(alice, &.{coordinator});
+
+            pub fn process(ctx: *info.RoleCtx(alice)) !@This() {
+                const random: std.Random = ctx.xoshiro256.random();
+                const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
+                return .{ .resp = .{ .data = res } };
+            }
+
+            pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
+                switch (msg) {
+                    .resp => |val| {
+                        if (val.data) ctx.counter += 1;
+                    },
                 }
+            }
+        };
 
-                pub fn preprocess_0(ctx: *info.RoleCtx(alice), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
-
-                pub fn preprocess_1(ctx: *info.RoleCtx(bob), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
-            };
-        }
-
-        pub fn AliceResp(NextFsmState: type) type {
-            return union(enum) {
-                resp: Data(bool, BobResp(NextFsmState)),
-
-                pub const info = two_pc(alice, &.{coordinator});
-
-                pub fn process(ctx: *info.RoleCtx(alice)) !@This() {
-                    const random: std.Random = ctx.xoshiro256.random();
-                    const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
-                    return .{ .resp = .{ .data = res } };
-                }
-
-                pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
-                    switch (msg) {
-                        .resp => |val| {
-                            if (val.data) ctx.counter += 1;
-                        },
-                    }
-                }
-            };
-        }
-        pub fn BobResp(NextFsmState: type) type {
-            return union(enum) {
-                resp: Data(bool, Check(NextFsmState)),
+        pub const BobResp =
+            union(enum) {
+                resp: Data(bool, Check),
 
                 pub const info = two_pc(bob, &.{coordinator});
 
@@ -155,35 +163,22 @@ pub fn mk2pc(
                     }
                 }
             };
-        }
 
-        pub fn Check(NextFsmState: type) type {
-            return union(enum) {
-                succcessed: Data(void, NextFsmState),
-                failed_retry: Data(void, Start(NextFsmState)),
+        pub const Check = union(enum) {
+            succcessed: Data(void, NextFsmState),
+            failed_retry: Data(void, Start),
 
-                pub const info = two_pc(coordinator, &.{ alice, bob });
+            pub const info = two_pc(coordinator, &.{ alice, bob });
 
-                pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
-                    if (ctx.counter == 2) {
-                        ctx.counter = 0;
-                        return .{ .succcessed = .{ .data = {} } };
-                    }
+            pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
+                if (ctx.counter == 2) {
                     ctx.counter = 0;
-                    return .{ .failed_retry = .{ .data = {} } };
+                    return .{ .succcessed = .{ .data = {} } };
                 }
-
-                pub fn preprocess_0(ctx: *info.RoleCtx(alice), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
-
-                pub fn preprocess_1(ctx: *info.RoleCtx(bob), msg: @This()) !void {
-                    _ = ctx;
-                    _ = msg;
-                }
-            };
-        }
+                ctx.counter = 0;
+                return .{ .failed_retry = .{ .data = {} } };
+            }
+        };
     };
 }
 
@@ -243,6 +238,8 @@ pub fn main() !void {
 
             var alice_context: AliceContext = undefined;
             alice_context.counter = 0;
+            alice_context.pingpong_client.client_counter = 0;
+            alice_context.pingpong_server.server_counter = 0;
             const fill_ptr: []u8 = @ptrCast(&alice_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
 
@@ -296,6 +293,8 @@ pub fn main() !void {
 
             var bob_context: BobContext = undefined;
             bob_context.counter = 0;
+            bob_context.pingpong_client.client_counter = 0;
+            bob_context.pingpong_server.server_counter = 0;
             const fill_ptr: []u8 = @ptrCast(&bob_context.xoshiro256.s);
             std.crypto.random.bytes(fill_ptr);
 
@@ -345,6 +344,9 @@ pub fn main() !void {
     var charlie_context: CharlieContext = undefined;
     charlie_context.counter = 0;
     charlie_context.times_2pc = 0;
+
+    charlie_context.pingpong_client.client_counter = 0;
+    charlie_context.pingpong_server.server_counter = 0;
     const fill_ptr: []u8 = @ptrCast(&charlie_context.xoshiro256.s);
     std.crypto.random.bytes(fill_ptr);
 
