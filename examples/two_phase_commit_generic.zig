@@ -85,6 +85,7 @@ const AllRole = enum { selector, alice, bob, charlie };
 
 const AliceContext = struct {
     counter: u32 = 0,
+    retry_times: u32 = 0,
     xoshiro256: std.Random.Xoshiro256 = undefined,
     pingpong_client: pingpong.ClientContext = .{ .client_counter = 0 },
     pingpong_server: pingpong.ServerContext = .{ .server_counter = 0 },
@@ -92,6 +93,7 @@ const AliceContext = struct {
 
 const BobContext = struct {
     counter: u32 = 0,
+    retry_times: u32 = 0,
     xoshiro256: std.Random.Xoshiro256 = undefined,
     pingpong_client: pingpong.ClientContext = .{ .client_counter = 0 },
     pingpong_server: pingpong.ServerContext = .{ .server_counter = 0 },
@@ -99,6 +101,7 @@ const BobContext = struct {
 
 const CharlieContext = struct {
     counter: u32 = 0,
+    retry_times: u32 = 0,
     xoshiro256: std.Random.Xoshiro256 = undefined,
     pingpong_client: pingpong.ClientContext = .{ .client_counter = 0 },
     pingpong_server: pingpong.ServerContext = .{ .server_counter = 0 },
@@ -134,33 +137,22 @@ fn PingPong(client: AllRole, server: AllRole, Next: type) type {
 }
 
 fn CAB(Next: type) type {
-    return mk2pc(AllRole, .charlie, .alice, .bob, Context{}, Next);
+    return mk2pc(AllRole, .charlie, .alice, .bob, Context{}, Next, ps.Exit);
 }
 fn ABC(Next: type) type {
-    return mk2pc(AllRole, .alice, .bob, .charlie, Context{}, Next);
+    return mk2pc(AllRole, .alice, .bob, .charlie, Context{}, Next, ps.Exit);
 }
 fn BAC(Next: type) type {
-    return mk2pc(AllRole, .bob, .alice, .charlie, Context{}, Next);
+    return mk2pc(AllRole, .bob, .alice, .charlie, Context{}, Next, ps.Exit);
 }
 
 //Randomly select a 2pc protocol
 pub const Random2pc = union(enum) {
-    charlie_as_coordinator: Data(
-        void,
-        PingPong(
-            .alice,
-            .bob,
-            PingPong(
-                .bob,
-                .charlie,
-                PingPong(
-                    .charlie,
-                    .alice,
-                    CAB(@This()).Start,
-                ).Start,
-            ).Start,
-        ).Start,
-    ),
+    charlie_as_coordinator: Data(void, PingPong(.alice, .bob, PingPong(.bob, .charlie, PingPong(
+        .charlie,
+        .alice,
+        CAB(@This()).Start,
+    ).Start).Start).Start),
     alice_as_coordinator: Data(void, PingPong(.charlie, .bob, ABC(@This()).Start).Start),
     bob_as_coordinator: Data(void, PingPong(.alice, .charlie, BAC(@This()).Start).Start),
     exit: Data(void, ps.Exit),
@@ -200,7 +192,8 @@ pub fn mk2pc(
     alice: Role,
     bob: Role,
     context: anytype,
-    NextFsmState: type,
+    Successed: type,
+    Failed: type,
 ) type {
     return struct {
         fn two_pc(sender: Role, receiver: []const Role) ps.ProtocolInfo(
@@ -208,7 +201,7 @@ pub fn mk2pc(
             Role,
             context,
             &.{ coordinator, alice, bob },
-            &.{NextFsmState},
+            &.{ Successed, Failed },
         ) {
             return .{ .sender = sender, .receiver = receiver };
         }
@@ -219,7 +212,7 @@ pub fn mk2pc(
             pub const info = two_pc(coordinator, &.{ alice, bob });
 
             pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
-                _ = ctx;
+                ctx.counter = 0;
                 return .{ .begin = .{ .data = {} } };
             }
         };
@@ -266,18 +259,24 @@ pub fn mk2pc(
             };
 
         pub const Check = union(enum) {
-            succcessed: Data(void, NextFsmState),
+            succcessed: Data(void, Successed),
+            failed: Data(void, Failed),
             failed_retry: Data(void, Start),
 
             pub const info = two_pc(coordinator, &.{ alice, bob });
 
             pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
                 if (ctx.counter == 2) {
-                    ctx.counter = 0;
+                    ctx.retry_times = 0;
                     return .{ .succcessed = .{ .data = {} } };
+                } else if (ctx.retry_times < 4) {
+                    ctx.retry_times += 1;
+                    std.debug.print("2pc failed retry: {d}\n", .{ctx.retry_times});
+                    return .{ .failed_retry = .{ .data = {} } };
+                } else {
+                    ctx.retry_times = 0;
+                    return .{ .failed = .{ .data = {} } };
                 }
-                ctx.counter = 0;
-                return .{ .failed_retry = .{ .data = {} } };
             }
         };
     };
