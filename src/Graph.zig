@@ -438,7 +438,7 @@ pub fn initWithFsm(allocator: std.mem.Allocator, comptime State_: type) !Graph {
     return .{
         .arena = arena,
         .edges = edges,
-        .name = @TypeOf(State_.info).Name,
+        .name = @TypeOf(State_.info).ProtocolName,
         .nodes = nodes,
     };
 }

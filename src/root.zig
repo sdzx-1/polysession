@@ -3,7 +3,7 @@ const meta = std.meta;
 pub const Graph = @import("Graph.zig");
 
 pub fn ProtocolInfo(
-    comptime Name_: []const u8,
+    comptime ProtocolName_: []const u8,
     comptime Role_: type,
     comptime context_: anytype,
     comptime internal_roles_: []const Role_,
@@ -26,7 +26,7 @@ pub fn ProtocolInfo(
         sender: Role_,
         receiver: []const Role_,
 
-        pub const Name = Name_;
+        pub const ProtocolName = ProtocolName_;
         pub const Role = Role_;
         pub const context = context_;
         pub const internal_roles: []const Role_ = internal_roles_;
@@ -69,7 +69,7 @@ pub const Exit = union(enum) {
     pub const info: Info = .{};
 
     pub const Info = struct {
-        pub const Name = "polysession_exit";
+        pub const ProtocolName = "polysession_exit";
         pub const Role = void;
         pub const Context = void;
     };
@@ -129,7 +129,7 @@ fn TypeSet(comptime bucket_count: usize) type {
 pub fn reachableStates(comptime State: type) struct { states: []const type, state_machine_names: []const []const u8 } {
     comptime {
         var states: []const type = &.{State};
-        var state_machine_names: []const []const u8 = &.{@TypeOf(State.info).Name};
+        var state_machine_names: []const []const u8 = &.{@TypeOf(State.info).ProtocolName};
         var states_stack: []const type = &.{State};
         var states_set: TypeSet(128) = .init;
         const ExpectedContext = @TypeOf(State.info).context;
@@ -247,7 +247,7 @@ fn reachableStatesDepthFirstSearch(
                         }
 
                         states.* = states.* ++ &[_]type{NextState};
-                        state_machine_names.* = state_machine_names.* ++ &[_][]const u8{@TypeOf(NextState.info).Name};
+                        state_machine_names.* = state_machine_names.* ++ &[_][]const u8{@TypeOf(NextState.info).ProtocolName};
                         states_stack.* = states_stack.* ++ &[_]type{NextState};
                         states_set.insert(NextState);
 
