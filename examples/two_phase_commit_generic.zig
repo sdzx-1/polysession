@@ -69,15 +69,22 @@ pub fn main() !void {
         }
     };
 
-    const alice_thread = try std.Thread.spawn(.{}, alice.run, .{&mvar_channel_map});
-    const bob_thread = try std.Thread.spawn(.{}, bob.run, .{&mvar_channel_map});
-    const charlie_thread = try std.Thread.spawn(.{}, charlie.run, .{&mvar_channel_map});
-    const selector_thread = try std.Thread.spawn(.{}, selector.run, .{&mvar_channel_map});
+    // var evented: std.Io.Evented = undefined;
+    // try evented.init(gpa);
+    // const io = evented.io();
 
-    alice_thread.join();
-    bob_thread.join();
-    charlie_thread.join();
-    selector_thread.join();
+    var threaded = std.Io.Threaded.init(gpa);
+    const io = threaded.io();
+
+    var alice_thread = try io.concurrent(alice.run, .{&mvar_channel_map});
+    var bob_thread = try io.concurrent(bob.run, .{&mvar_channel_map});
+    var charlie_thread = try io.concurrent(charlie.run, .{&mvar_channel_map});
+    var selector_thread = try io.concurrent(selector.run, .{&mvar_channel_map});
+
+    try alice_thread.await(io);
+    try bob_thread.await(io);
+    try charlie_thread.await(io);
+    try selector_thread.await(io);
 }
 
 //
