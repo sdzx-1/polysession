@@ -34,7 +34,7 @@ pub fn MkPingPong(
 
             pub const info = pingpogn_info(client, &.{server});
 
-            pub fn process(parent_ctx: *info.RoleCtx(client)) !@This() {
+            pub fn process(parent_ctx: *info.Ctx(client)) !@This() {
                 const ctx = client_ctxFromParent(parent_ctx);
                 if (ctx.client_counter >= 10) {
                     ctx.client_counter = 0;
@@ -43,7 +43,7 @@ pub fn MkPingPong(
                 return .{ .ping = .{ .data = ctx.client_counter } };
             }
 
-            pub fn preprocess_0(parent_ctx: *info.RoleCtx(server), msg: @This()) !void {
+            pub fn preprocess_0(parent_ctx: *info.Ctx(server), msg: @This()) !void {
                 const ctx = server_ctxFromParent(parent_ctx);
                 switch (msg) {
                     .ping => |val| ctx.server_counter = val.data,

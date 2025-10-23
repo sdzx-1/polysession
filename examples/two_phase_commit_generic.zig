@@ -211,7 +211,7 @@ pub fn mk2pc(
 
             pub const info = two_pc(coordinator, &.{ alice, bob });
 
-            pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
+            pub fn process(ctx: *info.Ctx(coordinator)) !@This() {
                 ctx.counter = 0;
                 return .{ .begin = .{ .data = {} } };
             }
@@ -222,13 +222,13 @@ pub fn mk2pc(
 
             pub const info = two_pc(alice, &.{coordinator});
 
-            pub fn process(ctx: *info.RoleCtx(alice)) !@This() {
+            pub fn process(ctx: *info.Ctx(alice)) !@This() {
                 const random: std.Random = ctx.xoshiro256.random();
                 const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
                 return .{ .resp = .{ .data = res } };
             }
 
-            pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
+            pub fn preprocess_0(ctx: *info.Ctx(coordinator), msg: @This()) !void {
                 switch (msg) {
                     .resp => |val| {
                         if (val.data) ctx.counter += 1;
@@ -243,13 +243,13 @@ pub fn mk2pc(
 
                 pub const info = two_pc(bob, &.{coordinator});
 
-                pub fn process(ctx: *info.RoleCtx(bob)) !@This() {
+                pub fn process(ctx: *info.Ctx(bob)) !@This() {
                     const random: std.Random = ctx.xoshiro256.random();
                     const res: bool = random.intRangeAtMost(u32, 0, 100) < 80;
                     return .{ .resp = .{ .data = res } };
                 }
 
-                pub fn preprocess_0(ctx: *info.RoleCtx(coordinator), msg: @This()) !void {
+                pub fn preprocess_0(ctx: *info.Ctx(coordinator), msg: @This()) !void {
                     switch (msg) {
                         .resp => |val| {
                             if (val.data) ctx.counter += 1;
@@ -265,7 +265,7 @@ pub fn mk2pc(
 
             pub const info = two_pc(coordinator, &.{ alice, bob });
 
-            pub fn process(ctx: *info.RoleCtx(coordinator)) !@This() {
+            pub fn process(ctx: *info.Ctx(coordinator)) !@This() {
                 if (ctx.counter == 2) {
                     ctx.retry_times = 0;
                     return .{ .succcessed = .{ .data = {} } };

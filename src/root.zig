@@ -32,7 +32,7 @@ pub fn ProtocolInfo(
         pub const internal_roles: []const Role_ = internal_roles_;
         pub const extern_state: []const type = extern_state_;
 
-        pub fn RoleCtx(_: @This(), r: Role_) type {
+        pub fn Ctx(_: @This(), r: Role_) type {
             return @field(context_, @tagName(r));
         }
 
@@ -356,7 +356,7 @@ pub fn Runner(
             comptime mult_channel_static_index_role: bool,
             mult_channel: anytype,
             curr_id: StateId,
-            ctx: *State_.info.RoleCtx(curr_role),
+            ctx: *State_.info.Ctx(curr_role),
         ) !void {
             @setEvalBranchQuota(10_000_000);
             sw: switch (curr_id) {
