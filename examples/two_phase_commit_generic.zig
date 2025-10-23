@@ -17,7 +17,7 @@ pub fn main() !void {
     if (arg_iter.next()) |arg_str| {
         std.debug.print("arg_str {s}\n", .{arg_str});
         if (std.mem.eql(u8, "dot", arg_str)) {
-            const graph: ps.Graph = try ps.Graph.initWithFsm(gpa, Random2pc);
+            const graph: ps.Graph = try ps.Graph.initWithFsm(gpa, Start);
             const graph_fs = try std.fs.cwd().createFile("t.dot", .{});
             var graph_fs_writer = graph_fs.writer(try gpa.alloc(u8, 1 << 20));
             try graph.generateDot(&graph_fs_writer.interface);
@@ -108,7 +108,7 @@ const CharlieContext = struct {
 };
 
 const SelectorContext = struct {
-    times_2pc: u32 = 0,
+    times: u32 = 0,
     xoshiro256: std.Random.Xoshiro256 = undefined,
 };
 
@@ -119,7 +119,7 @@ const Context = struct {
     selector: type = SelectorContext,
 };
 
-pub const EnterFsmState = Random2pc;
+pub const EnterFsmState = Start;
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);
@@ -147,31 +147,32 @@ fn BAC(Next: type) type {
 }
 
 //Randomly select a 2pc protocol
-pub const Random2pc = union(enum) {
+pub const Start = union(enum) {
     charlie_as_coordinator: Data(void, PingPong(.alice, .bob, PingPong(.bob, .charlie, PingPong(
         .charlie,
         .alice,
-        CAB(@This()).Start,
-    ).Start).Start).Start),
-    alice_as_coordinator: Data(void, PingPong(.charlie, .bob, ABC(@This()).Start).Start),
-    bob_as_coordinator: Data(void, PingPong(.alice, .charlie, BAC(@This()).Start).Start),
+        CAB(@This()).Begin,
+    ).Ping).Ping).Ping),
+    alice_as_coordinator: Data(void, PingPong(.charlie, .bob, ABC(@This()).Begin).Ping),
+    bob_as_coordinator: Data(void, PingPong(.alice, .charlie, BAC(@This()).Begin).Ping),
     exit: Data(void, ps.Exit),
 
     pub const info: ps.ProtocolInfo(
-        "random_2pc",
+        "random_pingpong_and_2pc",
         AllRole,
         Context{},
         &.{ .selector, .charlie, .alice, .bob },
         &.{},
     ) = .{
+        .name = "Start",
         .sender = .selector,
         .receiver = &.{ .charlie, .alice, .bob },
     };
 
     pub fn process(ctx: *SelectorContext) !@This() {
-        ctx.times_2pc += 1;
-        std.debug.print("times_2pc: {d}\n", .{ctx.times_2pc});
-        if (ctx.times_2pc > 300) {
+        ctx.times += 1;
+        std.debug.print("times: {d}\n", .{ctx.times});
+        if (ctx.times > 300) {
             return .{ .exit = .{ .data = {} } };
         }
 
@@ -196,20 +197,24 @@ pub fn mk2pc(
     Failed: type,
 ) type {
     return struct {
-        fn two_pc(sender: Role, receiver: []const Role) ps.ProtocolInfo(
+        fn two_pc(
+            StateName: []const u8,
+            sender: Role,
+            receiver: []const Role,
+        ) ps.ProtocolInfo(
             "2pc_generic",
             Role,
             context,
             &.{ coordinator, alice, bob },
             &.{ Successed, Failed },
         ) {
-            return .{ .sender = sender, .receiver = receiver };
+            return .{ .name = StateName, .sender = sender, .receiver = receiver };
         }
 
-        pub const Start = union(enum) {
+        pub const Begin = union(enum) {
             begin: Data(void, AliceResp),
 
-            pub const info = two_pc(coordinator, &.{ alice, bob });
+            pub const info = two_pc("Begin", coordinator, &.{ alice, bob });
 
             pub fn process(ctx: *info.Ctx(coordinator)) !@This() {
                 ctx.counter = 0;
@@ -220,7 +225,7 @@ pub fn mk2pc(
         pub const AliceResp = union(enum) {
             resp: Data(bool, BobResp),
 
-            pub const info = two_pc(alice, &.{coordinator});
+            pub const info = two_pc("AliceResp", alice, &.{coordinator});
 
             pub fn process(ctx: *info.Ctx(alice)) !@This() {
                 const random: std.Random = ctx.xoshiro256.random();
@@ -241,7 +246,7 @@ pub fn mk2pc(
             union(enum) {
                 resp: Data(bool, Check),
 
-                pub const info = two_pc(bob, &.{coordinator});
+                pub const info = two_pc("BobResp", bob, &.{coordinator});
 
                 pub fn process(ctx: *info.Ctx(bob)) !@This() {
                     const random: std.Random = ctx.xoshiro256.random();
@@ -261,9 +266,9 @@ pub fn mk2pc(
         pub const Check = union(enum) {
             succcessed: Data(void, Successed),
             failed: Data(void, Failed),
-            failed_retry: Data(void, Start),
+            failed_retry: Data(void, Begin),
 
-            pub const info = two_pc(coordinator, &.{ alice, bob });
+            pub const info = two_pc("Check", coordinator, &.{ alice, bob });
 
             pub fn process(ctx: *info.Ctx(coordinator)) !@This() {
                 if (ctx.counter == 2) {

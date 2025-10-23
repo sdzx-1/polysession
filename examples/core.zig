@@ -37,7 +37,7 @@ fn SendFile(Successed: type, Failed: type) type {
     );
 }
 
-pub const EnterFsmState = PingPong(SendFile(PingPong(ps.Exit).Start, ps.Exit).Start).Start;
+pub const EnterFsmState = PingPong(SendFile(PingPong(ps.Exit).Ping, ps.Exit).Start).Ping;
 
 pub const Runner = ps.Runner(EnterFsmState);
 pub const curr_id = Runner.idFromState(EnterFsmState);

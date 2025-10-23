@@ -33,6 +33,7 @@ pub fn MkSendFile(
 ) type {
     return struct {
         fn sendfile_info(
+            StateName: []const u8,
             sender_: Role,
             receiver_: []const Role,
         ) ps.ProtocolInfo(
@@ -42,7 +43,7 @@ pub fn MkSendFile(
             &.{ sender, receiver },
             &.{ Successed, Failed },
         ) {
-            return .{ .sender = sender_, .receiver = receiver_ };
+            return .{ .name = StateName, .sender = sender_, .receiver = receiver_ };
         }
 
         const SendFileSize = struct {
@@ -58,17 +59,17 @@ pub fn MkSendFile(
         };
 
         //Here, a temporary `info` is built to use `Cast`
-        pub const Start = sendfile_info(sender, &.{}).Cast(sender, receiver, u64, SendFileSize, Send);
+        pub const Start = sendfile_info("", sender, &.{}).Cast("SendFileSize", sender, receiver, u64, SendFileSize, Send);
 
         pub const Send = union(enum) {
             // zig fmt: off
             check     : Data(u64       , CheckHash(@This(), Failed)),
             send      : Data([]const u8, @This()),
-            final     : Data([]const u8, info.Cast(sender, receiver, u64, SendFinalHash, CheckHash(Successed, Failed))),
+            final     : Data([]const u8, info.Cast("SendFinalHash", sender, receiver, u64, SendFinalHash, CheckHash(Successed, Failed))),
             final_zero: Data(void      , Successed),
             // zig fmt: on
 
-            pub const info = sendfile_info(sender, &.{receiver});
+            pub const info = sendfile_info("Send", sender, &.{receiver});
 
             const SendFinalHash = struct {
                 pub fn process(parent_ctx: *@field(context, @tagName(sender))) !u64 {
@@ -149,7 +150,7 @@ pub fn MkSendFile(
                 Successed: Data(void, A),
                 Failed: Data(void, B),
 
-                pub const info = sendfile_info(receiver, &.{sender});
+                pub const info = sendfile_info("CheckHash", receiver, &.{sender});
 
                 pub fn process(parent_ctx: *@field(context, @tagName(receiver))) !@This() {
                     const ctx = recver_ctxFromParent(parent_ctx);

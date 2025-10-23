@@ -23,6 +23,7 @@ pub fn ProtocolInfo(
     }
 
     return struct {
+        name: []const u8 = "Nameless",
         sender: Role_,
         receiver: []const Role_,
 
@@ -40,6 +41,7 @@ pub fn ProtocolInfo(
 
         pub fn Cast(
             comptime _: Info,
+            comptime name: []const u8,
             comptime sender: Role,
             comptime receiver: Role,
             comptime T: type,
@@ -49,7 +51,7 @@ pub fn ProtocolInfo(
             return union(enum) {
                 cast: Data(T, NextState),
 
-                pub const info: Info = .{ .sender = sender, .receiver = &.{receiver} };
+                pub const info: Info = .{ .name = name, .sender = sender, .receiver = &.{receiver} };
 
                 pub fn process(ctx: *@field(context, @tagName(sender))) !@This() {
                     return .{ .cast = .{ .data = try CastFn.process(ctx) } };

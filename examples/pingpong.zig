@@ -22,17 +22,18 @@ pub fn MkPingPong(
 ) type {
     return struct {
         fn pingpogn_info(
+            StateName: []const u8,
             sender: Role,
             receiver: []const Role,
         ) ps.ProtocolInfo("pingpong", Role, context, &.{ client, server }, &.{NextFsmState}) {
-            return .{ .sender = sender, .receiver = receiver };
+            return .{ .name = StateName, .sender = sender, .receiver = receiver };
         }
 
-        pub const Start = union(enum) {
-            ping: Data(i32, info.Cast(server, client, i32, PongFn, @This())),
+        pub const Ping = union(enum) {
+            ping: Data(i32, info.Cast("Pong", server, client, i32, PongFn, @This())),
             next: Data(void, NextFsmState),
 
-            pub const info = pingpogn_info(client, &.{server});
+            pub const info = pingpogn_info("Ping", client, &.{server});
 
             pub fn process(parent_ctx: *info.Ctx(client)) !@This() {
                 const ctx = client_ctxFromParent(parent_ctx);
