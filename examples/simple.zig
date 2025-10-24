@@ -50,7 +50,7 @@ pub fn main() !void {
     //
 
     const S = struct {
-        fn clientFn(server_address: net.Address, dir: std.fs.Dir) !void {
+        fn run(server_address: net.Address, dir: std.fs.Dir) !void {
             const socket = try net.tcpConnectToAddress(server_address);
             defer socket.close();
 
@@ -90,7 +90,7 @@ pub fn main() !void {
         }
     };
 
-    const t = try std.Thread.spawn(.{}, S.clientFn, .{ server.listen_address, tmp_dir });
+    const t = try std.Thread.spawn(.{}, S.run, .{ server.listen_address, tmp_dir });
     defer t.join();
 
     //
