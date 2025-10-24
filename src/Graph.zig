@@ -12,6 +12,14 @@ edges: std.ArrayListUnmanaged(Edge),
 
 const Graph = @This();
 
+const colors: []const []const u8 = &.{
+    "red",       "green",    "blue",
+    "brown",     "navy",     "teal",
+    "cyan",      "magenta",  "darkred",
+    "darkgreen", "darkblue", "orange",
+    "purple",
+};
+
 pub const Node = struct {
     state_description: []const u8,
     id: u32,
@@ -67,12 +75,13 @@ pub fn generateDot(
 
             // Add node to current FSM subgraph
             try writer.print(
-                \\      {d}[shape=rect,  label="{s}"];
+                \\      {d}[shape=rect,  label="{s}", color = "{s}"];
                 \\
             ,
                 .{
                     node.id,
                     node.state_description,
+                    colors[@as(usize, @intCast(node.id)) % colors.len],
                 },
             );
         }
@@ -88,12 +97,14 @@ pub fn generateDot(
         // Add edges
         for (self.edges.items) |edge| {
             try writer.print(
-                \\    {d} -> {d} [label = "{s}"];
+                \\    {d} -> {d} [label = "{s}", color = "{s}", fontcolor = "{s}"];
                 \\
             , .{
                 edge.from,
                 edge.to,
                 edge.label,
+                colors[@as(usize, @intCast(edge.from)) % colors.len],
+                colors[@as(usize, @intCast(edge.from)) % colors.len],
             });
         }
 
