@@ -2,6 +2,29 @@ const std = @import("std");
 const meta = std.meta;
 pub const Graph = @import("Graph.zig");
 
+//The Exit status is unique.
+pub const Exit = union(enum) {
+    pub const info: Info = .{};
+
+    pub const Info = struct {
+        pub const ProtocolName = "polysession_exit";
+        pub const Role = void;
+        pub const Context = void;
+    };
+};
+
+//When switching protocols, all roles that were not in the previous protocol are notified and informed of the next status.
+pub const Notify = struct { polysession_notify: u8 };
+
+pub fn Data(Data_: type, State_: type) type {
+    return struct {
+        data: Data_,
+
+        pub const Data = Data_;
+        pub const State = State_;
+    };
+}
+
 pub fn ProtocolInfo(
     comptime ProtocolName_: []const u8,
     comptime Role_: type,
@@ -64,27 +87,6 @@ pub fn ProtocolInfo(
                 }
             };
         }
-    };
-}
-
-pub const Exit = union(enum) {
-    pub const info: Info = .{};
-
-    pub const Info = struct {
-        pub const ProtocolName = "polysession_exit";
-        pub const Role = void;
-        pub const Context = void;
-    };
-};
-
-pub const Notify = struct { polysession_notify: u8 };
-
-pub fn Data(Data_: type, State_: type) type {
-    return struct {
-        data: Data_,
-
-        pub const Data = Data_;
-        pub const State = State_;
     };
 }
 
@@ -328,7 +330,7 @@ pub fn Runner(
             return state_map.StateFromId(state_id);
         }
 
-        fn notify_extern_roles(
+        fn check_then_notify_extern_roles(
             comptime curr_role: Role,
             comptime mult_channel_static_index_role: bool,
             comptime state_id: StateId,
@@ -337,6 +339,7 @@ pub fn Runner(
             comptime extern_state: []const type,
             mult_channel: anytype,
         ) !void {
+            //Checks if the new state is an external state and the current role is `internal_roles[0]`.
             if (comptime std.mem.indexOfScalar(type, extern_state, NewState) != null and
                 curr_role == internal_roles[0])
             {
@@ -373,6 +376,10 @@ pub fn Runner(
                     const extern_state = comptime @TypeOf(info).extern_state;
 
                     if (comptime std.mem.indexOfScalar(Role, internal_roles, curr_role) == null) {
+                        //curr_role does not participate in the current protocol, so it waits for notification directly.
+                        //The person who notifies it is determined to be `internal_role[0]`.
+                        //The determinism here is very important.
+                        //It ensures that the sender and receiver of the notification can be determined by the state machine.
                         const notify: Notify =
                             if (mult_channel_static_index_role)
                                 try @field(mult_channel, @tagName(internal_roles[0])).recv(state_id, Notify)
@@ -382,6 +389,7 @@ pub fn Runner(
                         const next_state_id: StateId = @enumFromInt(notify.polysession_notify);
                         continue :sw next_state_id;
                     } else if (comptime curr_role == sender) {
+                        //The current role is the sender, which sends messages to all receivers.
                         const result = try State.process(ctx);
                         inline for (receiver) |rvr| {
                             if (mult_channel_static_index_role)
@@ -392,25 +400,47 @@ pub fn Runner(
                         switch (result) {
                             inline else => |new_fsm_state_wit| {
                                 const NewState = @TypeOf(new_fsm_state_wit).State;
-                                try notify_extern_roles(curr_role, mult_channel_static_index_role, state_id, NewState, internal_roles, extern_state, mult_channel);
+                                try check_then_notify_extern_roles(
+                                    curr_role,
+                                    mult_channel_static_index_role,
+                                    state_id,
+                                    NewState,
+                                    internal_roles,
+                                    extern_state,
+                                    mult_channel,
+                                );
                                 continue :sw comptime idFromState(NewState);
                             },
                         }
                     } else {
                         if (comptime std.mem.indexOfScalar(Role, receiver, curr_role)) |idx| {
+                            //curr_role is the receiver
                             const result =
                                 if (mult_channel_static_index_role)
                                     try @field(mult_channel, @tagName(sender)).recv(state_id, State)
                                 else
                                     try mult_channel.recv(curr_role, sender, state_id, State);
 
+                            //If the receiver needs to notify an external actor,
+                            // it should do so as soon as possible,
+                            // so that the external actor is notified before it executes its own handler function.
                             switch (result) {
                                 inline else => |new_fsm_state_wit| {
                                     const NewState = @TypeOf(new_fsm_state_wit).State;
-                                    try notify_extern_roles(curr_role, mult_channel_static_index_role, state_id, NewState, internal_roles, extern_state, mult_channel);
+                                    try check_then_notify_extern_roles(
+                                        curr_role,
+                                        mult_channel_static_index_role,
+                                        state_id,
+                                        NewState,
+                                        internal_roles,
+                                        extern_state,
+                                        mult_channel,
+                                    );
                                 },
                             }
 
+                            //The receiver's handler function is called based on the receiver's position in `receiver`.
+                            // This is a convention that needs to be met when writing code and provides type safety.
                             const fn_name = std.fmt.comptimePrint("preprocess_{d}", .{idx});
                             if (@hasDecl(State, fn_name)) {
                                 try @field(State, fn_name)(ctx, result);
@@ -425,9 +455,19 @@ pub fn Runner(
                         } else {
                             switch (@typeInfo(State)) {
                                 .@"union" => |U| {
+                                    //The current round of communication for this protocol does not involve curr_role.
+                                    // However, it still needs to check whether to notify external roles.
                                     comptime std.debug.assert(U.fields.len == 1);
                                     const NewState = U.fields[0].type.State;
-                                    try notify_extern_roles(curr_role, mult_channel_static_index_role, state_id, NewState, internal_roles, extern_state, mult_channel);
+                                    try check_then_notify_extern_roles(
+                                        curr_role,
+                                        mult_channel_static_index_role,
+                                        state_id,
+                                        NewState,
+                                        internal_roles,
+                                        extern_state,
+                                        mult_channel,
+                                    );
                                     continue :sw comptime idFromState(NewState);
                                 },
                                 else => unreachable,
