@@ -75,10 +75,11 @@ pub fn generateDot(
 
             // Add node to current FSM subgraph
             try writer.print(
-                \\      {d}[shape=rect,  label="{s}", color = "{s}"];
+                \\      {d}[shape=rect,  label="[{d}] {s}", color = "{s}"];
                 \\
             ,
                 .{
+                    node.id,
                     node.id,
                     node.state_description,
                     colors[@as(usize, @intCast(node.id)) % colors.len],
