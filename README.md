@@ -1,14 +1,42 @@
 A multi-role communication protocol framework.
 
-# Examples
-## pingpong
+
+## Adding polysession to your project
+Requires zig version greater than 0.15.0.
+
+
+Download and add polysession as a dependency by running the following command in your project root:
+```shell
+zig fetch --save git+https://github.com/sdzx-1/polysession.git
+```
+
+Then, retrieve the dependency in your build.zig:
+```zig
+const polysession = b.dependency("polysession", .{
+    .target = target,
+    .optimize = optimize,
+});
+```
+
+Finally, add the dependency's module to your module's imports:
+```zig
+exe_mod.addImport("polysession", polysession.module("root"));
+```
+
+You should now be able to import polysession in your module's code:
+```zig
+const ps = @import("polysession");
+```
+
+## Examples
+### pingpong
 ```shell
 zig build pingpong
 ```
 Alice and Bob have multiple ping-pong communications back and forth.
 
 ![pingpong](./data/pingpong.svg)
-## sendfile
+### sendfile
 
 ```shell
 zig build sendfile
@@ -16,7 +44,7 @@ zig build sendfile
 Alice sends a file to Bob, and every time she sends a chunk of data, she checks whether the hash values of the sent and received data match.
 
 ![sendfile](./data/sendfile.svg)
-## pingpong-sendfile
+### pingpong-sendfile
 
 ```shell
 zig build pingpong-sendfile
@@ -24,7 +52,7 @@ zig build pingpong-sendfile
 Combining the pingpong protocol and the sendfile protocol
 
 ![pingpong-sendfile](./data/pingpong-sendfile.svg)
-## 2pc
+### 2pc
 
 ```shell
 zig build 2pc
@@ -33,7 +61,7 @@ A two-phase protocol demo with Charlie as the coordinator and Alice and Bob as p
 Alice and Bob have no actual transactions; they simply randomly return true or false.
 
 ![2pc](./data/2pc.svg)
-## random-pingpong-2pc
+### random-pingpong-2pc
 
 ```shell
 zig build random-pingpong-2pc
