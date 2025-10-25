@@ -9,6 +9,8 @@ const ClientContext = core.ClientContext;
 const Runner = core.Runner;
 const curr_id = core.curr_id;
 
+pub const EnterFsmState = core.EnterFsmState;
+
 pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
