@@ -27,6 +27,29 @@ You should now be able to import polysession in your module's code:
 ```zig
 const ps = @import("polysession");
 ```
+## Core idea
+### 0. Polysession assumes that communication between roles is sequential
+Polysession ensures that the behavior of each role is completely determined by the state machine.
+If the communication itself can guarantee the order (such as TCP), then the protocol described by polysession is deterministic and the behavior of all roles is consistent.
+
+### 1. Compositionality of State
+
+Through [polystate](https://github.com/sdzx-1/polystate), we know that state can be used as a function and parameter, which we call high-order state.
+
+### 2. Viewing the Communication Process as State Machines
+Through the introduction [here](https://discourse.haskell.org/t/introduction-to-typed-session/10100), we know that communication can be modeled using a state machine.
+
+### 3. How to handle branch status in multi-role communication
+Multi-role communication differs from client-server communication in that polysession requires that messages generated during branching must be notified to all other parties.
+This ensures that all roles are synchronized.
+
+### 4. How to Combine Protocols with Different Participants
+If two protocol participants are exactly the same, then the states are directly combined.
+If the participants of the two protocols are different, then we need to notify all other roles except the roles of the previous protocol.
+This [issue](https://github.com/sdzx-1/polysession/issues/15) describes the situation.
+
+### 5. How to learn polysession
+You need to first familiarize yourself with polystate and how to combine states. Then look at the examples that come with polysession.
 
 ## Examples
 ### pingpong
