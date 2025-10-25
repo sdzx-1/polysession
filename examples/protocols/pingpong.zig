@@ -1,6 +1,5 @@
 const std = @import("std");
 const ps = @import("polysession");
-const core = @import("core.zig");
 const Data = ps.Data;
 
 pub const ServerContext = struct {

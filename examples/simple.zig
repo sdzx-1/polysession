@@ -3,33 +3,39 @@ const ps = @import("polysession");
 const net = std.net;
 const channel = @import("channel.zig");
 const StreamChannel = channel.StreamChannel;
-const core = @import("core.zig");
-const ServerContext = core.ServerContext;
-const ClientContext = core.ClientContext;
-const Runner = core.Runner;
-const curr_id = core.curr_id;
+const pingpong = @import("./protocols/pingpong.zig");
+const sendfile = @import("./protocols/sendfile.zig");
 
-pub const EnterFsmState = core.EnterFsmState;
+pub const ServerContext = struct {
+    pingpong: pingpong.ServerContext,
+    send_context: sendfile.SendContext,
+};
+
+pub const ClientContext = struct {
+    pingpong: pingpong.ClientContext,
+    recv_context: sendfile.RecvContext,
+};
+
+pub const Role = enum { client, server };
+
+pub const Context = struct {
+    client: type = ClientContext,
+    server: type = ServerContext,
+};
+
+fn PingPong(NextFsmState: type) type {
+    return pingpong.MkPingPong(Role, .client, .server, Context{}, .pingpong, .pingpong, NextFsmState);
+}
+fn SendFile(Successed: type, Failed: type) type {
+    return sendfile.MkSendFile(Role, .server, .client, Context{}, 20 * 1024 * 1024, .send_context, .recv_context, Successed, Failed);
+}
+
+pub const EnterFsmState = PingPong(SendFile(PingPong(ps.Exit).Ping, ps.Exit).Start).Ping;
+
+pub const Runner = ps.Runner(EnterFsmState);
+pub const curr_id = Runner.idFromState(EnterFsmState);
 
 pub fn main() !void {
-    var gpa_instance = std.heap.DebugAllocator(.{}).init;
-    const gpa = gpa_instance.allocator();
-
-    var arg_iter = try std.process.argsWithAllocator(gpa);
-    defer arg_iter.deinit();
-
-    _ = arg_iter.next();
-    if (arg_iter.next()) |arg_str| {
-        std.debug.print("arg_str {s}\n", .{arg_str});
-        if (std.mem.eql(u8, "dot", arg_str)) {
-            const graph: ps.Graph = try core.graph(gpa);
-            const graph_fs = try std.fs.cwd().createFile("t.dot", .{});
-            var graph_fs_writer = graph_fs.writer(try gpa.alloc(u8, 1 << 20));
-            try graph.generateDot(&graph_fs_writer.interface);
-            try graph_fs_writer.interface.flush();
-        }
-    }
-
     //create tmp dir
     var tmp_dir_instance = std.testing.tmpDir(.{});
     defer tmp_dir_instance.cleanup();

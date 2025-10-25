@@ -2,28 +2,13 @@ const std = @import("std");
 const ps = @import("polysession");
 const Data = ps.Data;
 const net = std.net;
-const pingpong = @import("pingpong.zig");
+const pingpong = @import("./protocols/pingpong.zig");
 
 const MvarChannelMap = @import("channel.zig").MvarChannelMap(AllRole);
 
 pub fn main() !void {
     var gpa_instance = std.heap.DebugAllocator(.{}).init;
     const gpa = gpa_instance.allocator();
-
-    var arg_iter = try std.process.argsWithAllocator(gpa);
-    defer arg_iter.deinit();
-
-    _ = arg_iter.next();
-    if (arg_iter.next()) |arg_str| {
-        std.debug.print("arg_str {s}\n", .{arg_str});
-        if (std.mem.eql(u8, "dot", arg_str)) {
-            const graph: ps.Graph = try ps.Graph.initWithFsm(gpa, Start);
-            const graph_fs = try std.fs.cwd().createFile("t.dot", .{});
-            var graph_fs_writer = graph_fs.writer(try gpa.alloc(u8, 1 << 20));
-            try graph.generateDot(&graph_fs_writer.interface);
-            try graph_fs_writer.interface.flush();
-        }
-    }
 
     var mvar_channel_map: MvarChannelMap = .init();
     try mvar_channel_map.generate_all_MvarChannel(gpa, 10);
