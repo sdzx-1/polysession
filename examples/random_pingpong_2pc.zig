@@ -1,7 +1,6 @@
 const std = @import("std");
 const ps = @import("polysession");
 const Data = ps.Data;
-const net = std.net;
 const pingpong = @import("./protocols/pingpong.zig");
 const mk2pc = @import("./protocols/two_phase_commit.zig").mk2pc;
 

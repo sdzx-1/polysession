@@ -6,28 +6,28 @@ const StreamChannel = channel.StreamChannel;
 const pingpong = @import("./protocols/pingpong.zig");
 const sendfile = @import("./protocols/sendfile.zig");
 
-pub const ServerContext = struct {
-    pingpong: pingpong.ServerContext,
+pub const AliceContext = struct {
+    pingpong: pingpong.ClientContext,
     send_context: sendfile.SendContext,
 };
 
-pub const ClientContext = struct {
-    pingpong: pingpong.ClientContext,
+pub const BobContext = struct {
+    pingpong: pingpong.ServerContext,
     recv_context: sendfile.RecvContext,
 };
 
-pub const Role = enum { client, server };
+pub const Role = enum { alice, bob };
 
 pub const Context = struct {
-    client: type = ClientContext,
-    server: type = ServerContext,
+    alice: type = AliceContext,
+    bob: type = BobContext,
 };
 
 fn PingPong(NextFsmState: type) type {
-    return pingpong.MkPingPong(Role, .client, .server, Context{}, .pingpong, .pingpong, NextFsmState);
+    return pingpong.MkPingPong(Role, .alice, .bob, Context{}, .pingpong, .pingpong, NextFsmState);
 }
 fn SendFile(Successed: type, Failed: type) type {
-    return sendfile.MkSendFile(Role, .server, .client, Context{}, 20 * 1024 * 1024, .send_context, .recv_context, Successed, Failed);
+    return sendfile.MkSendFile(Role, .alice, .bob, Context{}, 20 * 1024 * 1024, .send_context, .recv_context, Successed, Failed);
 }
 
 pub const EnterFsmState = PingPong(SendFile(PingPong(ps.Exit).Ping, ps.Exit).Start).Ping;
@@ -75,18 +75,18 @@ pub fn main() !void {
 
             var file_writer = write_file.writer(&file_writer_buf);
 
-            var client_context: ClientContext = .{
-                .pingpong = .{ .client_counter = 0 },
+            var client_context: BobContext = .{
+                .pingpong = .{ .server_counter = 0 },
                 .recv_context = .{
                     .writer = &file_writer.interface,
                 },
             };
 
             try Runner.runProtocol(
-                .client,
+                .bob,
                 true,
                 .{
-                    .server = StreamChannel{
+                    .alice = StreamChannel{
                         .reader = stream_reader.interface(),
                         .writer = &stream_writer.interface,
                         .log = false,
@@ -119,8 +119,8 @@ pub fn main() !void {
 
     var file_reader = read_file.reader(&file_reader_buf);
 
-    var server_context: ServerContext = .{
-        .pingpong = .{ .server_counter = 0 },
+    var server_context: AliceContext = .{
+        .pingpong = .{ .client_counter = 0 },
         .send_context = .{
             .reader = &file_reader.interface,
             .file_size = (try read_file.stat()).size,
@@ -128,10 +128,10 @@ pub fn main() !void {
     };
 
     const stid = try std.Thread.spawn(.{}, Runner.runProtocol, .{
-        .server,
+        .alice,
         true,
         .{
-            .client = StreamChannel{
+            .bob = StreamChannel{
                 .reader = stream_reader.interface(),
                 .writer = &stream_writer.interface,
                 .log = false,

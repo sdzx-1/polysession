@@ -13,6 +13,9 @@ pub fn build(b: *std.Build) void {
         name: []const u8,
         path: []const u8,
     } = &.{
+        .{ .name = "2pc", .path = "examples/2pc.zig" },
+        .{ .name = "pingpong", .path = "examples/pingpong.zig" },
+        .{ .name = "sendfile", .path = "examples/sendfile.zig" },
         .{ .name = "pingpong-sendfile", .path = "examples/pingpong_sendfile.zig" },
         .{ .name = "random-pingpong-2pc", .path = "examples/random_pingpong_2pc.zig" },
     };
