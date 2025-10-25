@@ -13,8 +13,8 @@ pub fn build(b: *std.Build) void {
         name: []const u8,
         path: []const u8,
     } = &.{
-        .{ .name = "simple", .path = "examples/simple.zig" },
-        .{ .name = "2pc-generic", .path = "examples/two_phase_commit_generic.zig" },
+        .{ .name = "pingpong-sendfile", .path = "examples/pingpong_sendfile.zig" },
+        .{ .name = "random-pingpong-2pc", .path = "examples/random_pingpong_2pc.zig" },
     };
 
     inline for (exe_infos) |info| {
