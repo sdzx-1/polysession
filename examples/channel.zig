@@ -92,9 +92,13 @@ pub fn MvarChannelMap(Role: type) type {
         hashmap: std.AutoArrayHashMapUnmanaged([2]u8, MvarChannel),
         log: bool = true,
         msg_delay: ?u64 = 10, //ms
+        start_timestamp: i64,
 
         pub fn init() @This() {
-            return .{ .hashmap = .empty };
+            return .{
+                .hashmap = .empty,
+                .start_timestamp = std.time.milliTimestamp(),
+            };
         }
 
         //TODO: deinit
@@ -135,7 +139,13 @@ pub fn MvarChannelMap(Role: type) type {
         }
 
         pub fn send(self: @This(), curr_role: Role, other: Role, state_id: anytype, val: anytype) !void {
-            if (self.log) std.debug.print("statd_id: {d},  {t} send to {t}: {any}\n", .{ state_id, curr_role, other, val });
+            if (self.log) std.debug.print("[{D}] statd_id: {d},  {t} send to {t}: {any}\n", .{
+                (std.time.milliTimestamp() - self.start_timestamp) * std.time.ns_per_ms,
+                state_id,
+                curr_role,
+                other,
+                val,
+            });
             const mvar_channel = self.hashmap.get(.{ @intFromEnum(curr_role), @intFromEnum(other) }).?;
             try mvar_channel.send(state_id, val);
         }
