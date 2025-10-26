@@ -55,8 +55,6 @@ pub fn main() !void {
 
     var mvar_channel_map: MvarChannelMap = .init();
     try mvar_channel_map.generate_all_MvarChannel(gpa, 2 * 1024 * 1024);
-    mvar_channel_map.enable_log(.alice);
-    mvar_channel_map.enable_log(.bob);
 
     const alice = struct {
         fn run(mcm: *MvarChannelMap, tmp_dir_: std.fs.Dir) !void {

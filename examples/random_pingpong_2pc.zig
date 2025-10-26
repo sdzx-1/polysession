@@ -12,7 +12,6 @@ pub fn main() !void {
 
     var mvar_channel_map: MvarChannelMap = .init();
     try mvar_channel_map.generate_all_MvarChannel(gpa, 10);
-    mvar_channel_map.enable_log(.selector); //enable charlie channel log
 
     const alice = struct {
         fn run(mcm: *MvarChannelMap) !void {

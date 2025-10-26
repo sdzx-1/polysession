@@ -28,16 +28,12 @@ pub const MvarChannel = struct {
     mvar_a: *Mvar,
     mvar_b: *Mvar,
 
-    log: bool = false,
-    master: []const u8 = &.{},
-    other: []const u8 = &.{},
-
     pub fn recv(self: @This(), state_id: anytype, T: type) !T {
-        return try self.mvar_a.recv(state_id, T, self.log, self.master, self.other);
+        return try self.mvar_a.recv(state_id, T);
     }
 
     pub fn send(self: @This(), state_id: anytype, val: anytype) !void {
-        try self.mvar_b.send(state_id, val, self.log, self.master, self.other);
+        try self.mvar_b.send(state_id, val);
     }
 };
 
@@ -58,7 +54,7 @@ pub const Mvar = struct {
         return ref;
     }
 
-    pub fn recv(self: *@This(), state_id: anytype, T: type, log: bool, master: []const u8, other: []const u8) !T {
+    pub fn recv(self: *@This(), state_id: anytype, T: type) !T {
         self.mutex.lock();
 
         while (self.state == .empty) {
@@ -67,7 +63,6 @@ pub const Mvar = struct {
 
         var reader = std.Io.Reader.fixed(self.buff);
         const val = try Codec.decode(&reader, state_id, T);
-        if (log) std.debug.print("{s} recv form {s}: {any}\n", .{ master, other, val });
 
         self.state = .empty;
         self.mutex.unlock();
@@ -75,14 +70,13 @@ pub const Mvar = struct {
         return val;
     }
 
-    pub fn send(self: *@This(), state_id: anytype, val: anytype, log: bool, master: []const u8, other: []const u8) !void {
+    pub fn send(self: *@This(), state_id: anytype, val: anytype) !void {
         self.mutex.lock();
 
         while (self.state == .full) {
             self.cond.wait(&self.mutex);
         }
 
-        if (log) std.debug.print("{s} send to   {s}: {any}\n", .{ master, other, val });
         var writer = std.Io.Writer.fixed(self.buff);
         try Codec.encode(&writer, state_id, val);
         self.size = writer.buffered().len;
@@ -96,25 +90,14 @@ pub const Mvar = struct {
 pub fn MvarChannelMap(Role: type) type {
     return struct {
         hashmap: std.AutoArrayHashMapUnmanaged([2]u8, MvarChannel),
+        log: bool = true,
+        msg_delay: ?u64 = 10, //ms
 
         pub fn init() @This() {
             return .{ .hashmap = .empty };
         }
 
         //TODO: deinit
-
-        pub fn enable_log(self: @This(), role: Role) void {
-            self.set_log(role, true);
-        }
-
-        pub fn set_log(self: @This(), role: Role, val: bool) void {
-            var iter = self.hashmap.iterator();
-            while (iter.next()) |entry| {
-                if (entry.key_ptr.*[0] == @as(u8, @intFromEnum(role))) {
-                    entry.value_ptr.log = val;
-                }
-            }
-        }
 
         pub fn generate_all_MvarChannel(
             self: *@This(),
@@ -132,25 +115,13 @@ pub fn MvarChannelMap(Role: type) type {
                     try self.hashmap.put(
                         gpa,
                         .{ @as(u8, @intCast(i)), @as(u8, @intCast(j)) },
-                        .{
-                            .mvar_a = mvar_a,
-                            .mvar_b = mvar_b,
-                            .log = false,
-                            .master = @tagName(@as(Role, @enumFromInt(i))),
-                            .other = @tagName(@as(Role, @enumFromInt(j))),
-                        },
+                        .{ .mvar_a = mvar_a, .mvar_b = mvar_b },
                     );
 
                     try self.hashmap.put(
                         gpa,
                         .{ @as(u8, @intCast(j)), @as(u8, @intCast(i)) },
-                        .{
-                            .mvar_a = mvar_b,
-                            .mvar_b = mvar_a,
-                            .log = false,
-                            .master = @tagName(@as(Role, @enumFromInt(j))),
-                            .other = @tagName(@as(Role, @enumFromInt(i))),
-                        },
+                        .{ .mvar_a = mvar_b, .mvar_b = mvar_a },
                     );
                 }
             }
@@ -158,10 +129,13 @@ pub fn MvarChannelMap(Role: type) type {
 
         pub fn recv(self: @This(), curr_role: Role, other: Role, state_id: anytype, T: type) !T {
             const mvar_channel = self.hashmap.get(.{ @intFromEnum(curr_role), @intFromEnum(other) }).?;
-            return try mvar_channel.recv(state_id, T);
+            const res = try mvar_channel.recv(state_id, T);
+            if (self.msg_delay) |delay| std.Thread.sleep(std.time.ns_per_ms * delay);
+            return res;
         }
 
         pub fn send(self: @This(), curr_role: Role, other: Role, state_id: anytype, val: anytype) !void {
+            if (self.log) std.debug.print("statd_id: {d},  {t} send to {t}: {any}\n", .{ state_id, curr_role, other, val });
             const mvar_channel = self.hashmap.get(.{ @intFromEnum(curr_role), @intFromEnum(other) }).?;
             try mvar_channel.send(state_id, val);
         }
