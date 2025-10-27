@@ -66,7 +66,6 @@ pub fn MkSendFile(
             check     : Data(u64       , CheckHash(@This(), Failed)),
             send      : Data([]const u8, @This()),
             final     : Data([]const u8, info.Cast("SendFinalHash", sender, receiver, u64, SendFinalHash, CheckHash(Successed, Failed))),
-            final_zero: Data(void      , Successed),
             // zig fmt: on
 
             pub const info = sendfile_info("Send", sender, &.{receiver});
@@ -93,8 +92,6 @@ pub fn MkSendFile(
                 }
 
                 const n = try ctx.reader.readSliceShort(&ctx.send_buff);
-
-                if (n == 0) return .{ .final_zero = .{ .data = {} } };
 
                 if (n < ctx.send_buff.len) {
                     ctx.hasher.update(ctx.send_buff[0..n]);
@@ -133,9 +130,6 @@ pub fn MkSendFile(
                             size,
                             @as(f32, @floatFromInt(ctx.recved)) / @as(f32, @floatFromInt(ctx.total)),
                         });
-                    },
-                    .final_zero => {
-                        std.debug.print("recv: final_zero\n", .{});
                     },
                     .check => |val| {
                         ctx.recved_hash = val.data;
