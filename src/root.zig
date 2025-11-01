@@ -357,6 +357,7 @@ pub fn Runner(
             }
         }
         pub fn runProtocol(
+            io: std.Io,
             comptime curr_role: Role,
             comptime mult_channel_static_index_role: bool,
             mult_channel: anytype,
@@ -382,9 +383,9 @@ pub fn Runner(
                         //It ensures that the sender and receiver of the notification can be determined by the state machine.
                         const notify: Notify =
                             if (mult_channel_static_index_role)
-                                try @field(mult_channel, @tagName(internal_roles[0])).recv(state_id, Notify)
+                                try @field(mult_channel, @tagName(internal_roles[0])).recv(io, state_id, Notify)
                             else
-                                try mult_channel.recv(curr_role, internal_roles[0], state_id, Notify);
+                                try mult_channel.recv(io, curr_role, internal_roles[0], state_id, Notify);
 
                         const next_state_id: StateId = @enumFromInt(notify.polysession_notify);
                         continue :sw next_state_id;
@@ -417,9 +418,9 @@ pub fn Runner(
                             //curr_role is the receiver
                             const result =
                                 if (mult_channel_static_index_role)
-                                    try @field(mult_channel, @tagName(sender)).recv(state_id, State)
+                                    try @field(mult_channel, @tagName(sender)).recv(io, state_id, State)
                                 else
-                                    try mult_channel.recv(curr_role, sender, state_id, State);
+                                    try mult_channel.recv(io, curr_role, sender, state_id, State);
 
                             //If the receiver needs to notify an external actor,
                             // it should do so as soon as possible,
