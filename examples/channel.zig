@@ -11,7 +11,8 @@ pub const StreamChannel = struct {
     master: []const u8 = &.{},
     other: []const u8 = &.{},
 
-    pub fn recv(self: @This(), state_id: anytype, T: type) !T {
+    pub fn recv(self: @This(), io: std.Io, state_id: anytype, T: type) !T {
+        _ = io;
         const res = try Codec.decode(self.reader, state_id, T);
         if (self.log) std.debug.print("{s} recv form {s}: {any}\n", .{ self.master, self.other, res });
         return res;
@@ -91,13 +92,13 @@ pub fn MvarChannelMap(Role: type) type {
     return struct {
         hashmap: std.AutoArrayHashMapUnmanaged([2]u8, MvarChannel),
         log: bool = true,
-        msg_delay: ?u64 = 10, //ms
-        start_timestamp: i64,
+        msg_delay: ?i64 = 10, //ms
+        start_timestamp: std.time.Instant,
 
-        pub fn init() @This() {
+        pub fn init() !@This() {
             return .{
                 .hashmap = .empty,
-                .start_timestamp = std.time.milliTimestamp(),
+                .start_timestamp = try std.time.Instant.now(),
             };
         }
 
@@ -131,16 +132,16 @@ pub fn MvarChannelMap(Role: type) type {
             }
         }
 
-        pub fn recv(self: @This(), curr_role: Role, other: Role, state_id: anytype, T: type) !T {
+        pub fn recv(self: @This(), io: std.Io, curr_role: Role, other: Role, state_id: anytype, T: type) !T {
             const mvar_channel = self.hashmap.get(.{ @intFromEnum(curr_role), @intFromEnum(other) }).?;
             const res = try mvar_channel.recv(state_id, T);
-            if (self.msg_delay) |delay| std.Thread.sleep(std.time.ns_per_ms * delay);
+            if (self.msg_delay) |delay| try io.sleep(.fromMilliseconds(delay), .awake);
             return res;
         }
 
         pub fn send(self: @This(), curr_role: Role, other: Role, state_id: anytype, val: anytype) !void {
             if (self.log) std.debug.print("[{D}] statd_id: {d},  {t} send to {t}: {any}\n", .{
-                (std.time.milliTimestamp() - self.start_timestamp) * std.time.ns_per_ms,
+                (try std.time.Instant.now()).since(self.start_timestamp),
                 state_id,
                 curr_role,
                 other,

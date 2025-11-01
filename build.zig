@@ -74,9 +74,9 @@ pub fn addGraphFile(
     polysession: *std.Build.Module,
     target: std.Build.ResolvedTarget,
 ) std.Build.LazyPath {
-    const options = b.addOptions();
+    var options = b.addOptions();
 
-    const writer = options.contents.writer(b.allocator);
+    // const writer = options.contents.writer(b.allocator);
 
     const stdio_writer_setup =
         \\var stdout_buffer: [1024]u8 = undefined;
@@ -85,7 +85,7 @@ pub fn addGraphFile(
         \\defer writer.flush() catch @panic("Failed to flush");
     ;
 
-    writer.print(
+    options.contents.print(b.allocator,
         \\const std = @import("std");
         \\const ps = @import("polysession");
         \\const Target = @import("{s}");
@@ -116,7 +116,7 @@ pub fn addGraphFile(
         .root_module = opt_mod,
     });
     const run = b.addRunArtifact(opt_exe);
-    return run.captureStdOut();
+    return run.captureStdOut(.{});
 }
 
 pub fn addInstallGraphFile(
